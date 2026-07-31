@@ -164,7 +164,8 @@
 
       const configScript = document.createElement('script');
       configScript.id = 'gviz-config-script';
-      configScript.src = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?gid=${GID_CONFIG}&tqx=responseHandler:handleConfigData`;
+      // 加入 range=A1:B10 & headers=0，確保抓取最完整的儲存格陣列
+      configScript.src = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?gid=${GID_CONFIG}&range=A1:B10&headers=0&tqx=responseHandler:handleConfigData`;
       
       configScript.onerror = function() {
         console.warn('讀取系統設定分頁失敗，準備直接讀取標案資料');
@@ -181,46 +182,21 @@
     // rows[2] = Row 4 (B4 擅長條件)
     function handleConfigData(response) {
       try {
-        console.log("=== 系統設定 GViz 原始回應 ===", response);
-        
         if (response && response.table && response.table.rows) {
           const rows = response.table.rows;
-          console.log("所有資料列 (rows):", rows);
-
-          // 1. 最低金額 (B2 / Row 2)
-          let minBudgetStr = rows[0]?.c?.[1]?.v ?? rows[0]?.c?.[1]?.f ?? '';
           
-          // 2. 最高金額 (B3 / Row 3)
-          let maxBudgetStr = rows[1]?.c?.[1]?.v ?? rows[1]?.c?.[1]?.f ?? '';
+          // 由於指定 headers=0，列數對應如下：
+          // rows[1] -> Row 2 (B2)
+          // rows[2] -> Row 3 (B3)
+          // rows[3] -> Row 4 (B4)
           
-          // 3. 歷遍所有列尋找擅長條件（防止標題或列數偏移）
-          let skillsStr = '';
-          
-          // 先嘗試預設的 rows[2]
-          if (rows[2]?.c) {
-            console.log("rows[2] 內容:", rows[2].c);
-            // 嘗試取 Col B (index 1) 或 Col A (index 0)
-            skillsStr = rows[2].c[1]?.v ?? rows[2].c[1]?.f ?? '';
-          }
+          let minBudgetCell = rows[1]?.c?.[1];
+          let maxBudgetCell = rows[2]?.c?.[1];
+          let skillsCell = rows[3]?.c?.[1];
 
-          // 如果 rows[2] 沒抓到，自動掃描所有列尋找包含「行銷」或 B4 內容的儲存格
-          if (!skillsStr) {
-            rows.forEach((r, idx) => {
-              if (r && r.c) {
-                r.c.forEach((cell, cIdx) => {
-                  if (cell && (cell.v || cell.f)) {
-                    const val = String(cell.v || cell.f);
-                    console.log(`Row ${idx} Col ${cIdx} :`, val);
-                    if (idx >= 2 && cIdx >= 1 && !skillsStr) {
-                      skillsStr = val;
-                    }
-                  }
-                });
-              }
-            });
-          }
-
-          skillsStr = String(skillsStr).trim();
+          let minBudgetStr = minBudgetCell?.v ?? minBudgetCell?.f ?? '';
+          let maxBudgetStr = maxBudgetCell?.v ?? maxBudgetCell?.f ?? '';
+          let skillsStr = skillsCell?.v ?? skillsCell?.f ?? '';
 
           let minB = typeof minBudgetStr === 'number' ? minBudgetStr : parseInt(String(minBudgetStr).replace(/[^\d]/g, '')) || 0;
           let maxB = typeof maxBudgetStr === 'number' ? maxBudgetStr : parseInt(String(maxBudgetStr).replace(/[^\d]/g, '')) || 0;
