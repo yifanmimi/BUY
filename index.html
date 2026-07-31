@@ -184,9 +184,17 @@
         if (response && response.table && response.table.rows) {
           const rows = response.table.rows;
           
-          let minBudgetStr = rows[0]?.c[1]?.v ?? rows[0]?.c[1]?.f ?? '';
-          let maxBudgetStr = rows[1]?.c[1]?.v ?? rows[1]?.c[1]?.f ?? '';
-          let skillsStr = rows[2]?.c[1]?.v ?? rows[2]?.c[1]?.f ?? '';
+          // 1. 最低金額 (B2)
+          let minBudgetStr = rows[0]?.c?.[1]?.v ?? rows[0]?.c?.[1]?.f ?? '';
+          // 2. 最高金額 (B3)
+          let maxBudgetStr = rows[1]?.c?.[1]?.v ?? rows[1]?.c?.[1]?.f ?? '';
+          
+          // 3. 公司型態與擅長條件 (B4) - 強制轉字串並去除前後空白
+          let rawSkills = rows[2]?.c?.[1];
+          let skillsStr = '';
+          if (rawSkills) {
+            skillsStr = String(rawSkills.v ?? rawSkills.f ?? '').trim();
+          }
 
           let minB = typeof minBudgetStr === 'number' ? minBudgetStr : parseInt(String(minBudgetStr).replace(/[^\d]/g, '')) || 0;
           let maxB = typeof maxBudgetStr === 'number' ? maxBudgetStr : parseInt(String(maxBudgetStr).replace(/[^\d]/g, '')) || 0;
