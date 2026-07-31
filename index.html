@@ -39,12 +39,12 @@
     <!-- 載入中動畫 -->
     <div id="loading" class="text-center py-5">
       <div class="spinner-border text-primary" style="width: 3rem; height: 3rem;" role="status"></div>
-      <p class="mt-3 text-muted fw-bold">正在讀取最新標案資料...</p>
+      <p class="mt-3 text-muted fw-bold">正在連線 Google Sheets 同步設定與標案...</p>
     </div>
 
     <div id="content-area" style="display: none;">
       
-      <!-- 區塊一：★ 高分推薦標案（含篩選條件註記） -->
+      <!-- 區塊一：★ 高分推薦標案（動態撈取系統設定） -->
       <div class="card shadow-sm border-0 mb-5">
         <div class="card-header bg-white py-3">
           <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
@@ -56,17 +56,17 @@
             </div>
           </div>
           
-          <!-- 篩選條件註記區 -->
-          <div class="d-flex flex-wrap gap-2 align-items-center pt-1 border-top mt-2">
+          <!-- 動態篩選條件註記區 -->
+          <div class="d-flex flex-wrap gap-2 align-items-center pt-2 border-top mt-2">
             <span class="text-muted small fw-bold"><i class="bi bi-funnel-fill text-primary"></i> 篩選條件：</span>
-            <span class="badge bg-light text-dark border filter-note-badge">
-              <i class="bi bi-currency-dollar text-danger"></i> 預算金額：100萬 ~ 2,000萬元
+            <span class="badge bg-light text-dark border filter-note-badge" id="badge-budget">
+              <i class="bi bi-currency-dollar text-danger"></i> 預算金額：載入中...
             </span>
             <span class="badge bg-light text-dark border filter-note-badge">
               <i class="bi bi-award-fill text-warning"></i> 推薦標準：AI 評分 ≥ 70分 或 ★手動標記
             </span>
-            <span class="badge bg-light text-dark border filter-note-badge">
-              <i class="bi bi-cpu-fill text-info"></i> 評分依據：對齊公司型態與擅長條件（系統開發/維護/推廣專長）
+            <span class="badge bg-light text-dark border filter-note-badge" id="badge-skills">
+              <i class="bi bi-cpu-fill text-info"></i> 評分依據：載入中...
             </span>
           </div>
         </div>
@@ -132,7 +132,8 @@
 
   <script>
     const SPREADSHEET_ID = '1Hc2KqH0ZWT1Ty-5RBa4zdsx-8RLrHG-tNE5qJHuaQ6U';
-    const GID = '1698058908';
+    const GID_CONFIG = '888640987';   // 系統設定分頁
+    const GID_TENDERS = '1698058908'; // 每日勞務標案分頁
 
     let recommendedData = [];
     let otherData = [];
@@ -153,19 +154,70 @@
       }
     }
 
+    // 第一步：精準使用 GID 撈取「系統設定」分頁
     function fetchData() {
       document.getElementById('loading').style.display = 'block';
       document.getElementById('content-area').style.display = 'none';
 
+      const oldConfigScript = document.getElementById('gviz-config-script');
+      if (oldConfigScript) oldConfigScript.remove();
+
+      const configScript = document.createElement('script');
+      configScript.id = 'gviz-config-script';
+      configScript.src = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?gid=${GID_CONFIG}&tqx=responseHandler:handleConfigData`;
+      
+      configScript.onerror = function() {
+        console.warn('讀取系統設定分頁失敗，準備直接讀取標案資料');
+        fetchTendersData();
+      };
+
+      document.body.appendChild(configScript);
+    }
+
+    // 解析系統設定的列 (列0: 最低金額, 列1: 最高金額, 列2: 擅長條件)
+    function handleConfigData(response) {
+      try {
+        if (response && response.table && response.table.rows) {
+          const rows = response.table.rows;
+          
+          let minBudgetStr = rows[0]?.c[1]?.v || rows[0]?.c[1]?.f || '0';
+          let maxBudgetStr = rows[1]?.c[1]?.v || rows[1]?.c[1]?.f || '0';
+          let skillsStr = rows[2]?.c[1]?.v || rows[2]?.c[1]?.f || '公司擅長條件';
+
+          let minB = typeof minBudgetStr === 'number' ? minBudgetStr : parseInt(String(minBudgetStr).replace(/[^\d]/g, '')) || 0;
+          let maxB = typeof maxBudgetStr === 'number' ? maxBudgetStr : parseInt(String(maxBudgetStr).replace(/[^\d]/g, '')) || 0;
+
+          let budgetDisplay = `預算金額：${formatCurrency(minB)} ~ ${maxB > 0 ? formatCurrency(maxB) : '無上限'}`;
+          
+          document.getElementById('badge-budget').innerHTML = `<i class="bi bi-currency-dollar text-danger"></i> ${budgetDisplay}`;
+          document.getElementById('badge-skills').innerHTML = `<i class="bi bi-cpu-fill text-info"></i> 評分依據：${skillsStr}`;
+        }
+      } catch (err) {
+        console.error('解析系統設定時出錯:', err);
+      } finally {
+        // 接著讀取標案清單
+        fetchTendersData();
+      }
+    }
+
+    function formatCurrency(num) {
+      if (num >= 10000) {
+        return (num / 10000) + '萬';
+      }
+      return num.toLocaleString() + '元';
+    }
+
+    // 第二步：精準使用 GID 撈取「每日勞務標案」分頁
+    function fetchTendersData() {
       const oldScript = document.getElementById('gviz-script');
       if (oldScript) oldScript.remove();
 
       const script = document.createElement('script');
       script.id = 'gviz-script';
-      script.src = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?gid=${GID}&tqx=responseHandler:handleGvizData`;
+      script.src = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?gid=${GID_TENDERS}&tqx=responseHandler:handleGvizData`;
       
       script.onerror = function() {
-        alert('資料載入失敗，請確認試算表權限！');
+        alert('標案資料載入失敗，請確認試算表權限！');
         document.getElementById('loading').style.display = 'none';
       };
 
