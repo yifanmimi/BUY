@@ -181,20 +181,46 @@
     // rows[2] = Row 4 (B4 擅長條件)
     function handleConfigData(response) {
       try {
+        console.log("=== 系統設定 GViz 原始回應 ===", response);
+        
         if (response && response.table && response.table.rows) {
           const rows = response.table.rows;
-          
-          // 1. 最低金額 (B2)
+          console.log("所有資料列 (rows):", rows);
+
+          // 1. 最低金額 (B2 / Row 2)
           let minBudgetStr = rows[0]?.c?.[1]?.v ?? rows[0]?.c?.[1]?.f ?? '';
-          // 2. 最高金額 (B3)
+          
+          // 2. 最高金額 (B3 / Row 3)
           let maxBudgetStr = rows[1]?.c?.[1]?.v ?? rows[1]?.c?.[1]?.f ?? '';
           
-          // 3. 公司型態與擅長條件 (B4) - 強制轉字串並去除前後空白
-          let rawSkills = rows[2]?.c?.[1];
+          // 3. 歷遍所有列尋找擅長條件（防止標題或列數偏移）
           let skillsStr = '';
-          if (rawSkills) {
-            skillsStr = String(rawSkills.v ?? rawSkills.f ?? '').trim();
+          
+          // 先嘗試預設的 rows[2]
+          if (rows[2]?.c) {
+            console.log("rows[2] 內容:", rows[2].c);
+            // 嘗試取 Col B (index 1) 或 Col A (index 0)
+            skillsStr = rows[2].c[1]?.v ?? rows[2].c[1]?.f ?? '';
           }
+
+          // 如果 rows[2] 沒抓到，自動掃描所有列尋找包含「行銷」或 B4 內容的儲存格
+          if (!skillsStr) {
+            rows.forEach((r, idx) => {
+              if (r && r.c) {
+                r.c.forEach((cell, cIdx) => {
+                  if (cell && (cell.v || cell.f)) {
+                    const val = String(cell.v || cell.f);
+                    console.log(`Row ${idx} Col ${cIdx} :`, val);
+                    if (idx >= 2 && cIdx >= 1 && !skillsStr) {
+                      skillsStr = val;
+                    }
+                  }
+                });
+              }
+            });
+          }
+
+          skillsStr = String(skillsStr).trim();
 
           let minB = typeof minBudgetStr === 'number' ? minBudgetStr : parseInt(String(minBudgetStr).replace(/[^\d]/g, '')) || 0;
           let maxB = typeof maxBudgetStr === 'number' ? maxBudgetStr : parseInt(String(maxBudgetStr).replace(/[^\d]/g, '')) || 0;
