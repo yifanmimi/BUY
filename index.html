@@ -164,8 +164,9 @@
 
       const configScript = document.createElement('script');
       configScript.id = 'gviz-config-script';
-      // 加入 range=A1:B10 & headers=0，確保抓取最完整的儲存格陣列
-      configScript.src = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?gid=${GID_CONFIG}&range=A1:B10&headers=0&tqx=responseHandler:handleConfigData`;
+      // 強制寫明 select B 與 headers=0，確保 B 欄長文字百分之百完整回傳
+      const tqSql = encodeURIComponent("SELECT B");
+      configScript.src = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?gid=${GID_CONFIG}&tq=${tqSql}&headers=0&tqx=responseHandler:handleConfigData`;
       
       configScript.onerror = function() {
         console.warn('讀取系統設定分頁失敗，準備直接讀取標案資料');
@@ -185,14 +186,15 @@
         if (response && response.table && response.table.rows) {
           const rows = response.table.rows;
           
-          // 由於指定 headers=0，列數對應如下：
-          // rows[1] -> Row 2 (B2)
-          // rows[2] -> Row 3 (B3)
-          // rows[3] -> Row 4 (B4)
+          // 因為只 SELECT B，所以每個 row.c[0] 就直接是 B 欄的值：
+          // rows[0] -> B1 (標題)
+          // rows[1] -> B2 (最低預算)
+          // rows[2] -> B3 (最高預算)
+          // rows[3] -> B4 (擅長條件)
           
-          let minBudgetCell = rows[1]?.c?.[1];
-          let maxBudgetCell = rows[2]?.c?.[1];
-          let skillsCell = rows[3]?.c?.[1];
+          let minBudgetCell = rows[1]?.c?.[0];
+          let maxBudgetCell = rows[2]?.c?.[0];
+          let skillsCell = rows[3]?.c?.[0];
 
           let minBudgetStr = minBudgetCell?.v ?? minBudgetCell?.f ?? '';
           let maxBudgetStr = maxBudgetCell?.v ?? maxBudgetCell?.f ?? '';
