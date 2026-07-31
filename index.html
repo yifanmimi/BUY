@@ -91,9 +91,10 @@
   </div>
 
   <script>
+    // ✅ 直接使用 gid (1698058908) 避開中文編碼問題
     const SPREADSHEET_ID = '1Hc2KqH0ZWT1Ty-5RbA4zdsx-8RLrHG-tNE5qJHuaQ6U';
-    const SHEET_NAME = encodeURIComponent('每日勞務標案');
-    const SHEET_URL = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:json&sheet=${SHEET_NAME}`;
+    const GID = '1698058908'; // 你的「每日勞務標案」分頁 gid
+    const SHEET_URL = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:json&gid=${GID}`;
 
     let recommendedData = [];
     let otherData = [];
