@@ -21,12 +21,15 @@ jobs:
       - name: 安裝 Python 套件與 Playwright 瀏覽器
         run: |
           python -m pip install --upgrade pip
-          pip install playwright beautifulsoup4 gspread google-auth
+          # 1. 在這裡加入了 google-generativeai 套件
+          pip install playwright beautifulsoup4 gspread google-auth google-generativeai
           playwright install chromium
           playwright install-deps
 
       - name: 執行 Python 爬蟲並寫入 Google 試算表
+        # 2. 在這裡將 Secrets 帶入為 Python 看得到的環境變數
         env:
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
           SPREADSHEET_KEY: ${{ secrets.SPREADSHEET_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python search.py
