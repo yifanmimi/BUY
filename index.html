@@ -12,16 +12,24 @@
     .search-box { max-width: 400px; }
     .cursor-pointer { cursor: pointer; }
     .table-recommend { border-top: 3px solid #198754; }
+    /* 可點擊排序的表頭樣式 */
+    .sortable-th { cursor: pointer; user-select: none; }
+    .sortable-th:hover { background-color: #e9ecef; }
   </style>
 </head>
 <body>
 
   <div class="container py-4">
-    <!-- 標題與刷新按鈕 -->
+    <!-- 標題、日期與刷新按鈕 -->
     <div class="d-flex justify-content-between align-items-center mb-4">
       <div>
-        <h2 class="fw-bold text-dark mb-1">🤖 政府標案 AI 智能篩選系統</h2>
-        <p class="text-muted small mb-0">每日自動爬取、預算過濾與 AI 智慧評分</p>
+        <h2 class="fw-bold text-dark mb-1">🤖 帆船的政府標案AI篩選系統</h2>
+        <div class="d-flex align-items-center gap-2">
+          <p class="text-muted small mb-0">每日自動爬取、預算過濾與 AI 智慧評分</p>
+          <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle" id="data-date-badge">
+            <i class="bi bi-calendar3"></i> 資料日期：讀取中...
+          </span>
+        </div>
       </div>
       <button class="btn btn-primary" onclick="fetchData()">
         <i class="bi bi-arrow-clockwise"></i> 刷新資料
@@ -36,24 +44,24 @@
 
     <div id="content-area" style="display: none;">
       
-      <!-- 區塊一：★ 高分推薦標案 (表格欄位式 + 降冪排列) -->
+      <!-- 區塊一：★ 高分推薦標案 -->
       <div class="card shadow-sm border-0 mb-5">
         <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
           <h5 class="fw-bold text-success mb-0">
             <i class="bi bi-star-fill text-warning"></i> 高分推薦標案 (<span id="rec-count">0</span>)
           </h5>
-          <span class="badge bg-success-subtle text-success border border-success-subtle">已依分數高到低排序</span>
+          <span class="badge bg-success-subtle text-success border border-success-subtle">點擊表頭可切換排序</span>
         </div>
         <div class="card-body p-0">
           <div class="table-responsive">
             <table class="table table-hover align-middle mb-0 table-recommend">
               <thead class="table-light">
                 <tr>
-                  <th style="width: 8%;">AI評分</th>
-                  <th style="width: 15%;">招標機關</th>
-                  <th style="width: 35%;">標案名稱</th>
-                  <th style="width: 12%;">預算金額</th>
-                  <th style="width: 22%;">AI 評語</th>
+                  <th class="sortable-th" style="width: 10%;" onclick="sortData('rec', 'scoreNum')">AI評分 <span id="sort-rec-scoreNum">▼</span></th>
+                  <th class="sortable-th" style="width: 15%;" onclick="sortData('rec', 'orgStr')">招標機關 <span id="sort-rec-orgStr"></span></th>
+                  <th class="sortable-th" style="width: 33%;" onclick="sortData('rec', 'titleStr')">標案名稱 <span id="sort-rec-titleStr"></span></th>
+                  <th class="sortable-th" style="width: 14%;" onclick="sortData('rec', 'budgetNum')">預算金額 <span id="sort-rec-budgetNum"></span></th>
+                  <th style="width: 20%;">AI 評語</th>
                   <th style="width: 8%;">動作</th>
                 </tr>
               </thead>
@@ -64,7 +72,7 @@
       </div>
 
 
-      <!-- 區塊二：📋 剩餘標案清單 (表格欄位式 + 預設收合 + 搜尋) -->
+      <!-- 區塊二：📋 剩餘標案清單 (預設金額降冪) -->
       <div class="card shadow-sm border-0 mb-4">
         <div class="card-header bg-white py-3">
           <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
@@ -86,10 +94,10 @@
               <table class="table table-hover align-middle mb-0">
                 <thead class="table-light">
                   <tr>
-                    <th style="width: 15%;">招標機關</th>
-                    <th style="width: 45%;">標案名稱</th>
-                    <th style="width: 15%;">預算金額</th>
-                    <th style="width: 10%;">AI 評分</th>
+                    <th class="sortable-th" style="width: 18%;" onclick="sortData('other', 'orgStr')">招標機關 <span id="sort-other-orgStr"></span></th>
+                    <th class="sortable-th" style="width: 42%;" onclick="sortData('other', 'titleStr')">標案名稱 <span id="sort-other-titleStr"></span></th>
+                    <th class="sortable-th" style="width: 15%;" onclick="sortData('other', 'budgetNum')">預算金額 <span id="sort-other-budgetNum">▼</span></th>
+                    <th class="sortable-th" style="width: 10%;" onclick="sortData('other', 'scoreNum')">AI 評分 <span id="sort-other-scoreNum"></span></th>
                     <th style="width: 15%;">動作</th>
                   </tr>
                 </thead>
@@ -109,6 +117,11 @@
 
     let recommendedData = [];
     let otherData = [];
+    let currentFilteredOtherData = [];
+
+    // 紀錄目前的排序狀態：field (欄位), dir (desc/asc)
+    let recSortState = { field: 'scoreNum', dir: 'desc' };
+    let otherSortState = { field: 'budgetNum', dir: 'desc' };
 
     function toggleCollapse() {
       const area = document.getElementById('otherTendersArea');
@@ -134,7 +147,7 @@
       script.src = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?gid=${GID}&tqx=responseHandler:handleGvizData`;
       
       script.onerror = function() {
-        alert('資料載入失敗，請確認試算表權限已開啟！');
+        alert('資料載入失敗，請確認試算表權限！');
         document.getElementById('loading').style.display = 'none';
       };
 
@@ -143,9 +156,7 @@
 
     function handleGvizData(response) {
       try {
-        if (response.status === 'error') {
-          throw new Error(response.errors[0].detailed_message || 'GViz Error');
-        }
+        if (response.status === 'error') throw new Error('GViz Error');
 
         const table = response.table;
         const cols = table.cols.map(col => (col ? String(col.label).trim() : ''));
@@ -155,26 +166,25 @@
           if (row.c) {
             row.c.forEach((cell, idx) => {
               const colName = cols[idx];
-              if (colName) {
-                item[colName] = cell ? (cell.v !== null && cell.v !== undefined ? cell.v : cell.f) : '';
-              }
+              if (colName) item[colName] = cell ? (cell.v !== null && cell.v !== undefined ? cell.v : cell.f) : '';
             });
           }
           return item;
         });
 
+        let detectedDate = '';
+
         rows.forEach(item => {
-          let scoreVal = 0;
-          let budgetVal = 0;
-          let titleVal = '';
-          let orgVal = '-';
-          let reasonVal = '無評語';
-          let linkVal = '#';
-          let recVal = '';
+          let scoreVal = 0, budgetVal = 0;
+          let titleVal = '', orgVal = '-', reasonVal = '無評語', linkVal = '#', recVal = '';
 
           for (let key in item) {
             const cleanKey = key.trim();
             const val = String(item[key]);
+
+            if (!detectedDate && (cleanKey.includes('日期') || cleanKey.includes('時間') || val.match(/\d{2}-\d{2}/))) {
+              detectedDate = val;
+            }
 
             if (cleanKey.includes('評分') && !cleanKey.includes('理由')) scoreVal = parseInt(val.replace(/[^\d]/g, '')) || 0;
             if (cleanKey.includes('預算')) budgetVal = parseInt(val.replace(/[^\d]/g, '')) || 0;
@@ -194,13 +204,19 @@
           item.isRec = scoreVal >= 70 || String(recVal).includes('★');
         });
 
+        formatAndShowDate(detectedDate);
+
         recommendedData = rows.filter(r => r.isRec);
         otherData = rows.filter(r => !r.isRec);
 
-        recommendedData.sort((a, b) => b.scoreNum - a.scoreNum);
+        // 預設排序：高分推薦用「分數降冪」，剩餘標案用「金額降冪」
+        applySorting('rec', recSortState.field, recSortState.dir);
+        applySorting('other', otherSortState.field, otherSortState.dir);
+
+        currentFilteredOtherData = [...otherData];
 
         renderRecommended();
-        renderOthers(otherData);
+        renderOthers(currentFilteredOtherData);
 
         document.getElementById('rec-count').innerText = recommendedData.length;
         document.getElementById('other-count').innerText = otherData.length;
@@ -209,13 +225,90 @@
         document.getElementById('content-area').style.display = 'block';
 
       } catch (error) {
-        console.error('Data Processing Error:', error);
+        console.error('Data Error:', error);
         alert('資料解析失敗！');
         document.getElementById('loading').style.display = 'none';
       }
     }
 
-    // 渲染高分推薦表格
+    // 通用排序邏輯與箭頭更新
+    function sortData(type, field) {
+      let state = (type === 'rec') ? recSortState : otherSortState;
+
+      if (state.field === field) {
+        state.dir = (state.dir === 'desc') ? 'asc' : 'desc';
+      } else {
+        state.field = field;
+        state.dir = 'desc'; // 換欄位時預設先降冪
+      }
+
+      applySorting(type, state.field, state.dir);
+      updateSortIcons(type, state.field, state.dir);
+
+      if (type === 'rec') {
+        renderRecommended();
+      } else {
+        filterOtherTenders(); // 保持搜尋過濾結果重新渲染
+      }
+    }
+
+    function applySorting(type, field, dir) {
+      let targetList = (type === 'rec') ? recommendedData : otherData;
+
+      targetList.sort((a, b) => {
+        let valA = a[field];
+        let valB = b[field];
+
+        if (typeof valA === 'string') {
+          return dir === 'asc' ? valA.localeCompare(valB, 'zh-Hant') : valB.localeCompare(valA, 'zh-Hant');
+        } else {
+          return dir === 'asc' ? valA - valB : valB - valA;
+        }
+      });
+    }
+
+    function updateSortIcons(type, activeField, dir) {
+      const fields = (type === 'rec') 
+        ? ['scoreNum', 'orgStr', 'titleStr', 'budgetNum'] 
+        : ['orgStr', 'titleStr', 'budgetNum', 'scoreNum'];
+
+      fields.forEach(f => {
+        const el = document.getElementById(`sort-${type}-${f}`);
+        if (el) {
+          if (f === activeField) {
+            el.innerText = dir === 'desc' ? '▼' : '▲';
+          } else {
+            el.innerText = '';
+          }
+        }
+      });
+    }
+
+    function formatAndShowDate(rawDateStr) {
+      const dateBadge = document.getElementById('data-date-badge');
+      const today = new Date();
+      const currentYear = today.getFullYear();
+      let formattedDate = '';
+
+      if (rawDateStr) {
+        const match = String(rawDateStr).match(/(\d{4})?[-\/]?(\d{1,2})[-\/](\d{1,2})/);
+        if (match) {
+          const year = match[1] || currentYear;
+          const month = String(match[2]).padStart(2, '0');
+          const day = String(match[3]).padStart(2, '0');
+          formattedDate = `${year}-${month}-${day}`;
+        }
+      }
+
+      if (!formattedDate) {
+        const m = String(today.getMonth() + 1).padStart(2, '0');
+        const d = String(today.getDate()).padStart(2, '0');
+        formattedDate = `${currentYear}-${m}-${d}`;
+      }
+
+      dateBadge.innerHTML = `<i class="bi bi-calendar3"></i> 資料日期：${formattedDate}`;
+    }
+
     function renderRecommended() {
       const tbody = document.getElementById('recommended-table-body');
       tbody.innerHTML = '';
@@ -244,7 +337,6 @@
       });
     }
 
-    // 渲染剩餘標案表格
     function renderOthers(dataList) {
       const tbody = document.getElementById('other-table-body');
       tbody.innerHTML = '';
@@ -274,12 +366,12 @@
 
     function filterOtherTenders() {
       const keyword = document.getElementById('searchInput').value.toLowerCase().trim();
-      const filtered = otherData.filter(item => {
+      currentFilteredOtherData = otherData.filter(item => {
         const matchTitle = item.titleStr.toLowerCase().includes(keyword);
         const matchOrg = item.orgStr.toLowerCase().includes(keyword);
         return matchTitle || matchOrg;
       });
-      renderOthers(filtered);
+      renderOthers(currentFilteredOtherData);
     }
 
     window.onload = fetchData;
