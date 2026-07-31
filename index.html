@@ -180,17 +180,24 @@
         if (response && response.table && response.table.rows) {
           const rows = response.table.rows;
           
-          let minBudgetStr = rows[0]?.c[1]?.v || rows[0]?.c[1]?.f || '0';
-          let maxBudgetStr = rows[1]?.c[1]?.v || rows[1]?.c[1]?.f || '0';
-          let skillsStr = rows[2]?.c[1]?.v || rows[2]?.c[1]?.f || '行銷宣傳、數據分析、農田水利、教育宣導、財產盤點';
+          // 動態讀取 Google Sheets 設定，絕不寫死文字內容
+          let minBudgetStr = rows[0]?.c[1]?.v ?? rows[0]?.c[1]?.f ?? '';
+          let maxBudgetStr = rows[1]?.c[1]?.v ?? rows[1]?.c[1]?.f ?? '';
+          let skillsStr = rows[2]?.c[1]?.v ?? rows[2]?.c[1]?.f ?? '';
 
           let minB = typeof minBudgetStr === 'number' ? minBudgetStr : parseInt(String(minBudgetStr).replace(/[^\d]/g, '')) || 0;
           let maxB = typeof maxBudgetStr === 'number' ? maxBudgetStr : parseInt(String(maxBudgetStr).replace(/[^\d]/g, '')) || 0;
 
-          let budgetDisplay = `預算金額：${formatCurrency(minB)} ~ ${maxB > 0 ? formatCurrency(maxB) : '無上限'}`;
+          // 動態組合金額顯示
+          let budgetDisplay = '預算金額：';
+          if (minB > 0 || maxB > 0) {
+            budgetDisplay += `${formatCurrency(minB)} ~ ${maxB > 0 ? formatCurrency(maxB) : '無上限'}`;
+          } else {
+            budgetDisplay += '未限制';
+          }
           
           document.getElementById('badge-budget').innerHTML = `<i class="bi bi-currency-dollar text-danger"></i> ${budgetDisplay}`;
-          document.getElementById('badge-skills').innerHTML = `<i class="bi bi-cpu-fill text-info"></i> AI 評分依據 (公司擅長條件)：<strong>${skillsStr}</strong>`;
+          document.getElementById('badge-skills').innerHTML = `<i class="bi bi-cpu-fill text-info"></i> AI 評分依據 (公司擅長條件)：<strong>${skillsStr || '未設定'}</strong>`;
         }
       } catch (err) {
         console.error('解析系統設定時出錯:', err);
