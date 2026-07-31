@@ -1,29 +1,69 @@
-import asyncio
+import os
 import json
-import csv
+import asyncio
 from datetime import datetime
 from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
+import gspread
+from google.oauth2.service_account import Credentials
 
 # ---------------------------------------------------------------------------
-# 輔助函式：將標案資料存成 CSV 檔
+# Google Sheets 寫入邏輯
 # ---------------------------------------------------------------------------
-def save_to_csv(data, filename, fieldnames):
-    """將 list of dict 資料寫入 CSV 檔案"""
+def write_to_google_sheet(data):
+    """將標案資料直接寫入 Google 試算表"""
     if not data:
+        print("⚠️ 無資料可寫入試算表。")
         return
+
+    # 從環境變數讀取憑證與試算表 ID
+    sa_key_json = os.environ.get("GCP_SA_KEY")
+    spreadsheet_key = os.environ.get("SPREADSHEET_KEY")
+
+    if not sa_key_json or not spreadsheet_key:
+        raise ValueError("❌ 缺少 GCP_SA_KEY 或 SPREADSHEET_KEY 環境變數設定！")
+
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    
+    creds_dict = json.loads(sa_key_json)
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    client = gspread.authorize(creds)
+
+    # 開啟試算表
+    spreadsheet = client.open_by_key(spreadsheet_key)
+    
+    # 取得或建立「每日勞務標案」分頁
     try:
-        with open(filename, mode='w', encoding='utf-8-sig', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(data)
-        print(f"📁 已成功匯出檔案：{filename}")
-    except Exception as e:
-        print(f"❌ 寫入 {filename} 失敗: {e}")
+        sheet = spreadsheet.worksheet("每日勞務標案")
+    except gspread.exceptions.WorksheetNotFound:
+        sheet = spreadsheet.add_worksheet(title="每日勞務標案", rows="1000", cols="10")
+
+    # 清空舊資料並寫入標頭
+    sheet.clear()
+    headers = ["抓取日期時間", "招標機關", "標案名稱", "詳細連結"]
+    sheet.append_row(headers)
+
+    # 準備寫入的列資料
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    rows_to_insert = []
+    for item in data:
+        rows_to_insert.append([
+            now_str,
+            item["org"],
+            item["title"],
+            item["link"]
+        ])
+
+    # 批次寫入試算表
+    sheet.append_rows(rows_to_insert)
+    print(f"📊 已成功將 {len(rows_to_insert)} 筆標案資料寫入 Google 試算表！")
 
 
 # ---------------------------------------------------------------------------
-# Playwright 抓取當日『所有頁面』的勞務類標案
+# Playwright 爬蟲邏輯
 # ---------------------------------------------------------------------------
 async def fetch_all_daily_services():
     print("🔍 [Playwright] 開始抓取今日『所有』勞務類標案...\n")
@@ -38,19 +78,17 @@ async def fetch_all_daily_services():
 
         tenders = []
         try:
-            # 前往招標查詢頁面
             await page.goto("https://web.pcc.gov.tw/prkms/tender/common/basic/readTenderBasic", wait_until="domcontentloaded")
             await page.wait_for_timeout(1000)
 
-            # 1. 勾選「當日」
+            # 1. 勾選「當日」與「勞務類」
             today_label = page.locator("label").filter(has_text="當日").first
             await today_label.click(force=True)
 
-            # 2. 勾選「勞務類」
             service_label = page.locator("label[for='RadProctrgCate3'], #RadProctrgCate3").first
             await service_label.click(force=True)
 
-            # 3. 送出查詢
+            # 2. 送出搜尋
             print("🚀 送出查詢，抓取今日全量勞務案...")
             search_button = page.locator("input[value='搜尋'], #btnSearch, a:has-text('搜尋')").first
             
@@ -62,7 +100,7 @@ async def fetch_all_daily_services():
             await page.wait_for_load_state("networkidle")
             await page.wait_for_timeout(2000)
 
-            # 4. 迴圈處理多頁分頁抓取
+            # 3. 逐頁解析
             page_num = 1
             while True:
                 print(f"📄 正在解析第 {page_num} 頁...")
@@ -96,7 +134,7 @@ async def fetch_all_daily_services():
                 
                 print(f"   └─ 第 {page_num} 頁抓取到 {page_count} 筆標案。")
 
-                # 嘗試尋找並點擊「下一頁」按鈕
+                # 下一頁
                 next_button = page.locator("a:has-text('下一頁'), input[value='下一頁']").first
                 if await next_button.is_visible():
                     page_num += 1
@@ -118,23 +156,12 @@ async def fetch_all_daily_services():
 
 
 # ---------------------------------------------------------------------------
-# 主程式進入點
+# 主程式
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    today_str = datetime.now().strftime("%Y%m%d")
-    
-    # 執行爬蟲抓取全量標案
     daily_tenders = asyncio.run(fetch_all_daily_services())
     
     if daily_tenders:
-        # 存成 CSV 與 JSON 檔案
-        raw_csv_filename = f"today_services_{today_str}.csv"
-        raw_json_filename = f"today_services_{today_str}.json"
-        
-        save_to_csv(daily_tenders, raw_csv_filename, fieldnames=["org", "title", "link"])
-        with open(raw_json_filename, "w", encoding="utf-8") as f:
-            json.dump(daily_tenders, f, ensure_ascii=False, indent=2)
-            
-        print(f"💾 今日 {len(daily_tenders)} 筆勞務標案已成功存檔至 {raw_csv_filename} 與 {raw_json_filename}！\n")
+        write_to_google_sheet(daily_tenders)
     else:
-        print("💡 未抓取到任何標案資料。")
+        print("💡 未抓取到任何標案資料，取消寫入。")
