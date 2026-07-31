@@ -174,21 +174,25 @@
       document.body.appendChild(configScript);
     }
 
-    // 解析系統設定的列 (列0: 最低金額 B2, 列1: 最高金額 B3, 列2: 擅長條件 B4)
+    // 解析系統設定：
+    // Row 1 (標題): rows[0]
+    // Row 2 (B2 最低金額): rows[1]
+    // Row 3 (B3 最高金額): rows[2]
+    // Row 4 (B4 擅長條件): rows[3]
     function handleConfigData(response) {
       try {
         if (response && response.table && response.table.rows) {
           const rows = response.table.rows;
           
-          // 動態讀取 Google Sheets 設定，絕不寫死文字內容
-          let minBudgetStr = rows[0]?.c[1]?.v ?? rows[0]?.c[1]?.f ?? '';
-          let maxBudgetStr = rows[1]?.c[1]?.v ?? rows[1]?.c[1]?.f ?? '';
-          let skillsStr = rows[2]?.c[1]?.v ?? rows[2]?.c[1]?.f ?? '';
+          let minBudgetStr = rows[1]?.c[1]?.v ?? rows[1]?.c[1]?.f ?? '';
+          let maxBudgetStr = rows[2]?.c[1]?.v ?? rows[2]?.c[1]?.f ?? '';
+          
+          // 正確指向 Row 4 (B4 儲存格)
+          let skillsStr = rows[3]?.c[1]?.v ?? rows[3]?.c[1]?.f ?? '';
 
           let minB = typeof minBudgetStr === 'number' ? minBudgetStr : parseInt(String(minBudgetStr).replace(/[^\d]/g, '')) || 0;
           let maxB = typeof maxBudgetStr === 'number' ? maxBudgetStr : parseInt(String(maxBudgetStr).replace(/[^\d]/g, '')) || 0;
 
-          // 動態組合金額顯示
           let budgetDisplay = '預算金額：';
           if (minB > 0 || maxB > 0) {
             budgetDisplay += `${formatCurrency(minB)} ~ ${maxB > 0 ? formatCurrency(maxB) : '無上限'}`;
