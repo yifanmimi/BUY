@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>政府標案 AI 智能篩選系統</title>
+  <!-- Bootstrap 5 CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+  <style>
+    body { background-color: #f4f6f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
+    .card-recommend { border-left: 6px solid #198754; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+    .score-badge { font-size: 1.2rem; font-weight: bold; min-width: 75px; text-align: center; }
+    .search-box { max-width: 400px; }
+  </style>
+</head>
+<body>
+
+  <div class="container py-4">
+    <!-- 標題與重新整理 -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <div>
+        <h2 class="fw-bold text-dark mb-1">🤖 政府標案 AI 智能篩選系統</h2>
+        <p class="text-muted small mb-0">每日自動爬取、預算過濾與 AI 智慧評分</p>
+      </div>
+      <button class="btn btn-primary" onclick="fetchData()">
+        <i class="bi bi-arrow-clockwise"></i> 刷新資料
+      </button>
+    </div>
+
+    <!-- 載入中動畫 -->
+    <div id="loading" class="text-center py-5">
+      <div class="spinner-border text-primary" style="width: 3rem; height: 3rem;" role="status"></div>
+      <p class="mt-3 text-muted fw-bold">正在讀取最新標案資料...</p>
+    </div>
+
+    <div id="content-area" style="display: none;">
+      
+      <!-- 區塊一：★ 評分推薦案件 (降冪排列) -->
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4 class="fw-bold text-success mb-0">
+          <i class="bi bi-star-fill text-warning"></i> 高分推薦標案 (<span id="rec-count">0</span>)
+        </h4>
+        <span class="badge bg-success-subtle text-success border border-success-subtle">已依分數高到低排序</span>
+      </div>
+
+      <div id="recommended-list" class="row g-3 mb-5"></div>
+
+
+      <!-- 區塊二：📋 剩餘標案清單 (預設收合 + 搜尋功能) -->
+      <div class="card shadow-sm border-0 mb-4">
+        <div class="card-header bg-white py-3">
+          <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <button class="btn btn-link text-decoration-none text-dark fw-bold p-0 fs-5" type="button" data-bs-toggle="collapse" data-bs-target="#otherTendersCollapse">
+              <i class="bi bi-chevron-down me-1"></i> 剩餘標案清單 (<span id="other-count">0</span>)
+              <span class="text-muted fs-6 fw-normal ms-2">(點擊展開/收合)</span>
+            </button>
+            
+            <!-- 搜尋欄位 -->
+            <div class="search-box input-group input-group-sm">
+              <span class="input-group-text bg-light"><i class="bi bi-search"></i></span>
+              <input type="text" id="searchInput" class="form-control" placeholder="搜尋招標機關或標案名稱..." onkeyup="filterOtherTenders()">
+            </div>
+          </div>
+        </div>
+
+        <!-- 預設收合區域 (collapse) -->
+        <div id="otherTendersCollapse" class="collapse">
+          <div class="card-body p-0">
+            <div class="table-responsive">
+              <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                  <tr>
+                    <th style="width: 20%;">招標機關</th>
+                    <th style="width: 40%;">標案名稱</th>
+                    <th style="width: 15%;">預算金額</th>
+                    <th style="width: 10%;">AI 評分</th>
+                    <th style="width: 15%;">動作</th>
+                  </tr>
+                </thead>
+                <tbody id="other-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Bootstrap 5 JS Bundle -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.bundle.min.js"></script>
+
+  <script>
+    // ⚠️ 請替換為你的 Google 試算表 ID
+    const SPREADSHEET_ID = 'YOUR_SPREADSHEET_ID';
+    const SHEET_URL = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:json&sheet=每日勞務標案`;
+
+    let recommendedData = [];
+    let otherData = [];
+
+    async function fetchData() {
+      document.getElementById('loading').style.display = 'block';
+      document.getElementById('content-area').style.display = 'none';
+
+      try {
+        const response = await fetch(SHEET_URL);
+        const text = await response.text();
+        const json = JSON.parse(text.substring(47, text.length - 2));
+        
+        const cols = json.table.cols.map(col => col.label);
+        const rows = json.table.rows.map(row => {
+          let item = {};
+          row.c.forEach((cell, idx) => {
+            item[cols[idx]] = cell ? (cell.v || cell.f) : '';
+          });
+          return item;
+        });
+
+        // 整理資料與轉型
+        rows.forEach(item => {
+          item.scoreNum = parseInt(item['AI評分']) || 0;
+          item.budgetNum = parseInt(item['預算金額']) || 0;
+          item.titleStr = item['標案名稱'] || item['title'] || '';
+          item.orgStr = item['招標機關'] || '-';
+          item.reasonStr = item['AI評分理由'] || item['reason'] || '無評語';
+          item.linkStr = item['標案連結'] || '#';
+          item.isRec = String(item['推薦標記']).includes('★') || item.scoreNum >= 70;
+        });
+
+        // 分流：推薦標案與剩餘標案
+        recommendedData = rows.filter(r => r.isRec);
+        otherData = rows.filter(r => !r.isRec);
+
+        // 高分推薦案：依分數進行降冪排序 (High -> Low)
+        recommendedData.sort((a, b) => b.scoreNum - a.scoreNum);
+
+        renderRecommended();
+        renderOthers(otherData);
+
+        document.getElementById('rec-count').innerText = recommendedData.length;
+        document.getElementById('other-count').innerText = otherData.length;
+
+      } catch (error) {
+        console.error('Fetch Error:', error);
+        alert('資料載入失敗，請確認試算表權限已開啟為「知道連結的人」！');
+      } finally {
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('content-area').style.display = 'block';
+      }
+    }
+
+    // 渲染高分推薦區
+    function renderRecommended() {
+      const container = document.getElementById('recommended-list');
+      container.innerHTML = '';
+
+      if (recommendedData.length === 0) {
+        container.innerHTML = '<div class="col-12 text-muted py-3">今日無符合條件的高分推薦標案。</div>';
+        return;
+      }
+
+      recommendedData.forEach(item => {
+        const cardHtml = `
+          <div class="col-md-6">
+            <div class="card h-100 card-recommend bg-white">
+              <div class="card-body d-flex flex-column">
+                <div class="d-flex justify-content-between align-items-start mb-2">
+                  <span class="badge bg-success text-white score-badge py-2 px-3">
+                    ${item.scoreNum} 分
+                  </span>
+                  <span class="badge bg-light text-dark border">${item.orgStr}</span>
+                </div>
+                
+                <h5 class="card-title fw-bold text-dark fs-6 mb-2">${item.titleStr}</h5>
+                
+                <p class="text-secondary small mb-2">
+                  <strong>預算金額：</strong><span class="text-danger fw-bold">${item.budgetNum.toLocaleString()}</span>
+                </p>
+
+                <div class="alert alert-success py-2 px-3 small mb-3 mt-auto">
+                  💡 <strong>AI 評語：</strong>${item.reasonStr}
+                </div>
+
+                <a href="${item.linkStr}" target="_blank" class="btn btn-outline-primary btn-sm w-100">
+                  查看詳細標案內容 <i class="bi bi-box-arrow-up-right"></i>
+                </a>
+              </div>
+            </div>
+          </div>
+        `;
+        container.innerHTML += cardHtml;
+      });
+    }
+
+    // 渲染剩餘標案列表
+    function renderOthers(dataList) {
+      const tbody = document.getElementById('other-table-body');
+      tbody.innerHTML = '';
+
+      if (dataList.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">無符合關鍵字的標案</td></tr>';
+        return;
+      }
+
+      dataList.forEach(item => {
+        const rowHtml = `
+          <tr>
+            <td class="small fw-bold text-secondary">${item.orgStr}</td>
+            <td class="small fw-bold">${item.titleStr}</td>
+            <td class="small text-danger fw-bold">${item.budgetNum.toLocaleString()}</td>
+            <td><span class="badge bg-secondary">${item.scoreNum} 分</span></td>
+            <td>
+              <a href="${item.linkStr}" target="_blank" class="btn btn-sm btn-light border text-primary">
+                連結 <i class="bi bi-box-arrow-up-right"></i>
+              </a>
+            </td>
+          </tr>
+        `;
+        tbody.innerHTML += rowHtml;
+      });
+    }
+
+    // 搜尋功能：同時比對【招標機關】與【標案名稱】
+    function filterOtherTenders() {
+      const keyword = document.getElementById('searchInput').value.toLowerCase().trim();
+      
+      const filtered = otherData.filter(item => {
+        const matchTitle = item.titleStr.toLowerCase().includes(keyword);
+        const matchOrg = item.orgStr.toLowerCase().includes(keyword);
+        return matchTitle || matchOrg;
+      });
+
+      renderOthers(filtered);
+    }
+
+    // 初始載入
+    window.onload = fetchData;
+  </script>
+</body>
+</html>
