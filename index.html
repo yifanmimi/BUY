@@ -12,9 +12,9 @@
     .search-box { max-width: 400px; }
     .cursor-pointer { cursor: pointer; }
     .table-recommend { border-top: 3px solid #198754; }
-    /* 可點擊排序的表頭樣式 */
     .sortable-th { cursor: pointer; user-select: none; }
     .sortable-th:hover { background-color: #e9ecef; }
+    .filter-note-badge { font-size: 0.8rem; }
   </style>
 </head>
 <body>
@@ -23,7 +23,7 @@
     <!-- 標題、日期與刷新按鈕 -->
     <div class="d-flex justify-content-between align-items-center mb-4">
       <div>
-        <h2 class="fw-bold text-dark mb-1">🤖 帆船的政府標案AI篩選系統</h2>
+        <h2 class="fw-bold text-dark mb-1">🤖 帆船政府標案AI篩選系統</h2>
         <div class="d-flex align-items-center gap-2">
           <p class="text-muted small mb-0">每日自動爬取、預算過濾與 AI 智慧評分</p>
           <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle" id="data-date-badge">
@@ -44,14 +44,33 @@
 
     <div id="content-area" style="display: none;">
       
-      <!-- 區塊一：★ 高分推薦標案 -->
+      <!-- 區塊一：★ 高分推薦標案（含篩選條件註記） -->
       <div class="card shadow-sm border-0 mb-5">
-        <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
-          <h5 class="fw-bold text-success mb-0">
-            <i class="bi bi-star-fill text-warning"></i> 高分推薦標案 (<span id="rec-count">0</span>)
-          </h5>
-          <span class="badge bg-success-subtle text-success border border-success-subtle">點擊表頭可切換排序</span>
+        <div class="card-header bg-white py-3">
+          <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+            <div class="d-flex align-items-center gap-2">
+              <h5 class="fw-bold text-success mb-0">
+                <i class="bi bi-star-fill text-warning"></i> 高分推薦標案 (<span id="rec-count">0</span>)
+              </h5>
+              <span class="badge bg-success-subtle text-success border border-success-subtle">已依分數降冪排序</span>
+            </div>
+          </div>
+          
+          <!-- 篩選條件註記區 -->
+          <div class="d-flex flex-wrap gap-2 align-items-center pt-1 border-top mt-2">
+            <span class="text-muted small fw-bold"><i class="bi bi-funnel-fill text-primary"></i> 篩選條件：</span>
+            <span class="badge bg-light text-dark border filter-note-badge">
+              <i class="bi bi-currency-dollar text-danger"></i> 預算金額：100萬 ~ 2,000萬元
+            </span>
+            <span class="badge bg-light text-dark border filter-note-badge">
+              <i class="bi bi-award-fill text-warning"></i> 推薦標準：AI 評分 ≥ 70分 或 ★手動標記
+            </span>
+            <span class="badge bg-light text-dark border filter-note-badge">
+              <i class="bi bi-cpu-fill text-info"></i> 評分依據：對齊公司型態與擅長條件（系統開發/維護/推廣專長）
+            </span>
+          </div>
         </div>
+
         <div class="card-body p-0">
           <div class="table-responsive">
             <table class="table table-hover align-middle mb-0 table-recommend">
@@ -59,9 +78,9 @@
                 <tr>
                   <th class="sortable-th" style="width: 10%;" onclick="sortData('rec', 'scoreNum')">AI評分 <span id="sort-rec-scoreNum">▼</span></th>
                   <th class="sortable-th" style="width: 15%;" onclick="sortData('rec', 'orgStr')">招標機關 <span id="sort-rec-orgStr"></span></th>
-                  <th class="sortable-th" style="width: 33%;" onclick="sortData('rec', 'titleStr')">標案名稱 <span id="sort-rec-titleStr"></span></th>
-                  <th class="sortable-th" style="width: 14%;" onclick="sortData('rec', 'budgetNum')">預算金額 <span id="sort-rec-budgetNum"></span></th>
-                  <th style="width: 20%;">AI 評語</th>
+                  <th class="sortable-th" style="width: 30%;" onclick="sortData('rec', 'titleStr')">標案名稱 <span id="sort-rec-titleStr"></span></th>
+                  <th class="sortable-th" style="width: 13%;" onclick="sortData('rec', 'budgetNum')">預算金額 <span id="sort-rec-budgetNum"></span></th>
+                  <th style="width: 24%;">AI 評分依據與評語</th>
                   <th style="width: 8%;">動作</th>
                 </tr>
               </thead>
@@ -119,7 +138,6 @@
     let otherData = [];
     let currentFilteredOtherData = [];
 
-    // 紀錄目前的排序狀態：field (欄位), dir (desc/asc)
     let recSortState = { field: 'scoreNum', dir: 'desc' };
     let otherSortState = { field: 'budgetNum', dir: 'desc' };
 
@@ -209,7 +227,6 @@
         recommendedData = rows.filter(r => r.isRec);
         otherData = rows.filter(r => !r.isRec);
 
-        // 預設排序：高分推薦用「分數降冪」，剩餘標案用「金額降冪」
         applySorting('rec', recSortState.field, recSortState.dir);
         applySorting('other', otherSortState.field, otherSortState.dir);
 
@@ -231,7 +248,6 @@
       }
     }
 
-    // 通用排序邏輯與箭頭更新
     function sortData(type, field) {
       let state = (type === 'rec') ? recSortState : otherSortState;
 
@@ -239,7 +255,7 @@
         state.dir = (state.dir === 'desc') ? 'asc' : 'desc';
       } else {
         state.field = field;
-        state.dir = 'desc'; // 換欄位時預設先降冪
+        state.dir = 'desc';
       }
 
       applySorting(type, state.field, state.dir);
@@ -248,7 +264,7 @@
       if (type === 'rec') {
         renderRecommended();
       } else {
-        filterOtherTenders(); // 保持搜尋過濾結果重新渲染
+        filterOtherTenders();
       }
     }
 
