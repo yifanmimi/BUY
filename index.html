@@ -12,6 +12,7 @@
     .card-recommend { border-left: 6px solid #198754; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
     .score-badge { font-size: 1.2rem; font-weight: bold; min-width: 75px; text-align: center; }
     .search-box { max-width: 400px; }
+    .cursor-pointer { cursor: pointer; }
   </style>
 </head>
 <body>
@@ -51,10 +52,11 @@
       <div class="card shadow-sm border-0 mb-4">
         <div class="card-header bg-white py-3">
           <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
-            <button class="btn btn-link text-decoration-none text-dark fw-bold p-0 fs-5" type="button" data-bs-toggle="collapse" data-bs-target="#otherTendersCollapse">
-              <i class="bi bi-chevron-down me-1"></i> 剩餘標案清單 (<span id="other-count">0</span>)
+            <!-- 直接使用 onclick 觸發 JS 展開/收合，確保 100% 能點開 -->
+            <div class="fw-bold fs-5 cursor-pointer text-dark select-none" onclick="toggleCollapse()">
+              <i id="collapse-icon" class="bi bi-chevron-right me-1"></i> 剩餘標案清單 (<span id="other-count">0</span>)
               <span class="text-muted fs-6 fw-normal ms-2">(點擊展開/收合)</span>
-            </button>
+            </div>
             
             <!-- 搜尋欄位 -->
             <div class="search-box input-group input-group-sm">
@@ -64,15 +66,15 @@
           </div>
         </div>
 
-        <!-- 預設收合區域 (collapse) -->
-        <div id="otherTendersCollapse" class="collapse">
+        <!-- 手動控制顯示/隱藏的區域 -->
+        <div id="otherTendersArea" style="display: none;">
           <div class="card-body p-0">
             <div class="table-responsive">
               <table class="table table-hover align-middle mb-0">
                 <thead class="table-light">
                   <tr>
-                    <th style="width: 20%;">招標機關</th>
-                    <th style="width: 40%;">標案名稱</th>
+                    <th style="width: 18%;">招標機關</th>
+                    <th style="width: 42%;">標案名稱</th>
                     <th style="width: 15%;">預算金額</th>
                     <th style="width: 10%;">AI 評分</th>
                     <th style="width: 15%;">動作</th>
@@ -88,18 +90,26 @@
     </div>
   </div>
 
-  <!-- Bootstrap 5 JS Bundle -->
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.bundle.min.js"></script>
-
   <script>
-    // ⚠️ 請替換為你的 Google 試算表 ID
-    // ✅ 修改後的寫法（使用 encodeURIComponent 包裹中文）
     const SPREADSHEET_ID = '1Hc2KqH0ZWT1Ty-5RbA4zdsx-8RLrHG-tNE5qJHuaQ6U';
     const SHEET_NAME = encodeURIComponent('每日勞務標案');
     const SHEET_URL = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:json&sheet=${SHEET_NAME}`;
-    
+
     let recommendedData = [];
     let otherData = [];
+
+    // 手動開關剩餘標案清單
+    function toggleCollapse() {
+      const area = document.getElementById('otherTendersArea');
+      const icon = document.getElementById('collapse-icon');
+      if (area.style.display === 'none') {
+        area.style.display = 'block';
+        icon.className = 'bi bi-chevron-down me-1';
+      } else {
+        area.style.display = 'none';
+        icon.className = 'bi bi-chevron-right me-1';
+      }
+    }
 
     async function fetchData() {
       document.getElementById('loading').style.display = 'block';
@@ -110,31 +120,59 @@
         const text = await response.text();
         const json = JSON.parse(text.substring(47, text.length - 2));
         
-        const cols = json.table.cols.map(col => col.label);
+        const cols = json.table.cols.map(col => (col ? String(col.label).trim() : ''));
         const rows = json.table.rows.map(row => {
           let item = {};
-          row.c.forEach((cell, idx) => {
-            item[cols[idx]] = cell ? (cell.v || cell.f) : '';
-          });
+          if (row.c) {
+            row.c.forEach((cell, idx) => {
+              const colName = cols[idx];
+              if (colName) {
+                item[colName] = cell ? (cell.v !== null && cell.v !== undefined ? cell.v : cell.f) : '';
+              }
+            });
+          }
           return item;
         });
 
-        // 整理資料與轉型
+        // 動態尋找包含關鍵字的欄位，避免欄位名稱微小差異導致抓不到
         rows.forEach(item => {
-          item.scoreNum = parseInt(item['AI評分']) || 0;
-          item.budgetNum = parseInt(item['預算金額']) || 0;
-          item.titleStr = item['標案名稱'] || item['title'] || '';
-          item.orgStr = item['招標機關'] || '-';
-          item.reasonStr = item['AI評分理由'] || item['reason'] || '無評語';
-          item.linkStr = item['標案連結'] || '#';
-          item.isRec = String(item['推薦標記']).includes('★') || item.scoreNum >= 70;
+          let scoreVal = 0;
+          let budgetVal = 0;
+          let titleVal = '';
+          let orgVal = '-';
+          let reasonVal = '無評語';
+          let linkVal = '#';
+          let recVal = '';
+
+          for (let key in item) {
+            const cleanKey = key.trim();
+            const val = String(item[key]);
+
+            if (cleanKey.includes('評分') && !cleanKey.includes('理由')) scoreVal = parseInt(val.replace(/[^\d]/g, '')) || 0;
+            if (cleanKey.includes('預算')) budgetVal = parseInt(val.replace(/[^\d]/g, '')) || 0;
+            if (cleanKey.includes('標案名稱') || cleanKey.includes('名稱')) titleVal = item[key];
+            if (cleanKey.includes('機關')) orgVal = item[key];
+            if (cleanKey.includes('理由') || cleanKey.includes('評語')) reasonVal = item[key];
+            if (cleanKey.includes('連結') || cleanKey.includes('網址')) linkVal = item[key];
+            if (cleanKey.includes('推薦') || cleanKey.includes('標記')) recVal = item[key];
+          }
+
+          item.scoreNum = scoreVal;
+          item.budgetNum = budgetVal;
+          item.titleStr = titleVal || item['title'] || '未命名標案';
+          item.orgStr = orgVal || '-';
+          item.reasonStr = reasonVal || '無評語';
+          item.linkStr = linkVal || '#';
+          
+          // 判定條件：只要分數 >= 70，或是欄位內含 ★，即視為高分推薦案件
+          item.isRec = scoreVal >= 70 || String(recVal).includes('★');
         });
 
-        // 分流：推薦標案與剩餘標案
+        // 分流：推薦與剩餘
         recommendedData = rows.filter(r => r.isRec);
         otherData = rows.filter(r => !r.isRec);
 
-        // 高分推薦案：依分數進行降冪排序 (High -> Low)
+        // 降冪排序 (高 ➔ 低)
         recommendedData.sort((a, b) => b.scoreNum - a.scoreNum);
 
         renderRecommended();
@@ -145,14 +183,14 @@
 
       } catch (error) {
         console.error('Fetch Error:', error);
-        alert('資料載入失敗，請確認試算表權限已開啟為「知道連結的人」！');
+        alert('資料解析失敗，請再試一次');
       } finally {
         document.getElementById('loading').style.display = 'none';
         document.getElementById('content-area').style.display = 'block';
       }
     }
 
-    // 渲染高分推薦區
+    // 渲染高分推薦卡片
     function renderRecommended() {
       const container = document.getElementById('recommended-list');
       container.innerHTML = '';
@@ -201,7 +239,7 @@
       tbody.innerHTML = '';
 
       if (dataList.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">無符合關鍵字的標案</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">無符合條件的標案</td></tr>';
         return;
       }
 
@@ -223,7 +261,7 @@
       });
     }
 
-    // 搜尋功能：同時比對【招標機關】與【標案名稱】
+    // 關鍵字搜尋：搜尋【招標機關】與【標案名稱】
     function filterOtherTenders() {
       const keyword = document.getElementById('searchInput').value.toLowerCase().trim();
       
@@ -236,7 +274,6 @@
       renderOthers(filtered);
     }
 
-    // 初始載入
     window.onload = fetchData;
   </script>
 </body>
