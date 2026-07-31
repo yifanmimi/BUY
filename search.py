@@ -35,10 +35,10 @@ def get_system_settings(spreadsheet):
         return 0, 0, ""
 
 # ---------------------------------------------------------------------------
-# 2. Gemini AI 評分邏輯
+# 2. Gemini AI 評分邏輯 (批次處理超快版本)
 # ---------------------------------------------------------------------------
 def evaluate_tenders_with_ai(tenders, condition):
-    """使用 Gemini API 針對符合金額條件的標案名稱進行打分"""
+    """使用 Gemini API 批次進行標案名稱打分"""
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key or not condition:
         print("⚠️ 未設定 GEMINI_API_KEY 或 AI 條件為空，跳過 AI 打分。")
@@ -49,44 +49,78 @@ def evaluate_tenders_with_ai(tenders, condition):
         return tenders
 
     genai.configure(api_key=api_key)
+    # 使用最新強大的 Gemini 模型
     model = genai.GenerativeModel("gemini-3.5-flash")
 
-    print("\n🤖 開始進行 Gemini AI 標案名稱打分...")
+    # 1. 篩選出符合預算、需要 AI 評分的標案
+    valid_tenders = []
     for item in tenders:
         if not item.get("budget_pass", True):
             item["score"] = 0
             item["reason"] = "預算不符合設定範圍"
             item["recommended"] = "否"
-            continue
+        else:
+            valid_tenders.append(item)
+
+    if not valid_tenders:
+        print("ℹ️ 無符合預算條件的標案需進行 AI 評估。")
+        return tenders
+
+    print(f"\n🤖 開始對 {len(valid_tenders)} 筆符合預算的標案進行批次 AI 打分...")
+
+    # 2. 分批處理 (每批 20 筆)
+    BATCH_SIZE = 20
+    for i in range(0, len(valid_tenders), BATCH_SIZE):
+        batch = valid_tenders[i:i + BATCH_SIZE]
+        
+        # 組裝批次 Prompt
+        items_text = ""
+        for idx, item in enumerate(batch):
+            items_text += f"編號 {idx + 1}: {item['title']}\n"
 
         prompt = f"""
-        你是一個專業的政府標案篩選助手。
-        我們的公司擅長與關注的領域如下：
-        【{condition}】
+你是一個專業的政府標案篩選助手。
+我們的公司擅長與關注的領域如下：
+【{condition}】
 
-        請評估以下政府標案名稱：
-        【{item['title']}】
+請評估以下標案清單，依照與我們業務的相關度給予 0 到 100 的分數，並給出 15 字以內的簡短理由。
 
-        請依照相關度給予 0 到 100 的分數，並給出 15 字以內的簡短理由。
-        請嚴格按照以下 JSON 格式回答，不要包含 Markdown 標籤或額外文字：
-        {{"score": 85, "reason": "符合網站維護與系統開發需求"}}
-        """
+標案清單：
+{items_text}
+
+請嚴格按照以下 JSON 陣列格式回答，不要包含 Markdown 標籤或其他文字：
+[
+  {{"id": 1, "score": 85, "reason": "符合資安建置與防護需求"}},
+  {{"id": 2, "score": 20, "reason": "業務不符合，屬於水利工程"}}
+]
+"""
+        # 呼叫 API 並帶有容錯
         try:
             response = model.generate_content(prompt)
             clean_text = response.text.replace("```json", "").replace("```", "").strip()
-            res_json = json.loads(clean_text)
+            results = json.loads(clean_text)
 
-            score = int(res_json.get("score", 0))
-            reason = res_json.get("reason", "無")
+            # 將結果匹配回原始標案資料
+            res_dict = {res["id"]: res for res in results}
+            for idx, item in enumerate(batch):
+                res = res_dict.get(idx + 1, {})
+                score = int(res.get("score", 0))
+                reason = res.get("reason", "無評語")
 
-            item["score"] = score
-            item["reason"] = reason
-            item["recommended"] = "★ 推薦 (≥70)" if score >= 70 else "否"
+                item["score"] = score
+                item["reason"] = reason
+                item["recommended"] = "★ 推薦 (≥70)" if score >= 70 else "否"
+
         except Exception as e:
-            print(f"   ❌ 標案 [{item['title']}] AI 評估失敗: {e}")
-            item["score"] = 0
-            item["reason"] = "評估失敗"
-            item["recommended"] = "否"
+            print(f"⚠️ 批次 {i // BATCH_SIZE + 1} 評估失敗: {e}")
+            for item in batch:
+                item["score"] = 0
+                item["reason"] = "批次評估失敗"
+                item["recommended"] = "否"
+
+        # 批次之間微幅停頓 1 秒即可
+        import time
+        time.sleep(1)
 
     return tenders
 
