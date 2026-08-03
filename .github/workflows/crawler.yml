@@ -2,7 +2,7 @@ name: Daily Tender Crawler
 
 on:
   schedule:
-    - cron: '0 0 * * *' # 台灣時間每天上午 08:00 自動執行
+    - cron: '5 22 * * *' # 台灣時間每天上午 06:05 自動執行
   workflow_dispatch:
 
 jobs:
