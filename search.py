@@ -111,8 +111,8 @@ def evaluate_tenders_with_ai(tenders, condition):
         return tenders
 
     genai.configure(api_key=api_key)
-    # 使用最新的 Gemini 1.5 Flash 進行高速評估
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    # 使用最新的 Gemini 3.5 Flash 進行高速評估
+    model = genai.GenerativeModel("gemini-3.5-flash")
 
     # 1. 篩選出符合預算的標案
     valid_tenders = []
