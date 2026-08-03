@@ -2,8 +2,10 @@ import os
 import json
 import re
 import asyncio
+import time
 from datetime import datetime
 from playwright.async_api import async_playwright
+import aiohttp
 from bs4 import BeautifulSoup
 import gspread
 from google.oauth2.service_account import Credentials
@@ -35,10 +37,70 @@ def get_system_settings(spreadsheet):
         return 0, 0, ""
 
 # ---------------------------------------------------------------------------
-# 2. Gemini AI 評分邏輯 (批次處理超快版本)
+# 2. 異步 HTTP 高速抓取標案內頁【廠商資格摘要】與【附加說明】
+# ---------------------------------------------------------------------------
+async def fetch_tender_details_async(session, item, semaphore):
+    """使用 aiohttp 背景並行抓取標案詳細頁面中的廠商資格與附加說明"""
+    async with semaphore:  # 控制併發數量，避免瞬間打爆採購網或被鎖 IP
+        url = item.get("link")
+        if not url or not url.startswith("http"):
+            item["qualification"] = "網址無效"
+            return item
+
+        try:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status == 200:
+                    html = await response.text()
+                    soup = BeautifulSoup(html, "html.parser")
+
+                    qual_texts = []
+                    # 搜尋常見之資格說明欄位標籤
+                    target_keywords = ["廠商資格摘要", "附加說明", "廠商資格條件", "履約期限"]
+                    
+                    for td in soup.find_all(["td", "th"]):
+                        text = td.get_text(strip=True)
+                        for kw in target_keywords:
+                            if kw in text:
+                                next_td = td.find_next_sibling("td")
+                                if next_td:
+                                    clean_content = next_td.get_text(strip=True)
+                                    if clean_content:
+                                        qual_texts.append(f"【{kw}】: {clean_content}")
+
+                    # 裁切前 800 字，避免 Token 浪費
+                    full_qual = "\n".join(qual_texts)
+                    item["qualification"] = full_qual[:800] if full_qual else "無詳細資格說明"
+                else:
+                    item["qualification"] = "無法讀取頁面內容"
+        except Exception as e:
+            item["qualification"] = f"抓取失敗 ({type(e).__name__})"
+
+        return item
+
+async def enrich_tenders_with_details(tenders):
+    """併發處理所有標案內頁資格抓取 (300 筆約需 20~40 秒)"""
+    print(f"\n🚀 開始併發抓取 {len(tenders)} 筆標案的「廠商資格與附加說明」...")
+    start_time = time.time()
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    }
+    
+    # 限制同時最大 15 個連線，既快速又不會觸發防爬機制
+    semaphore = asyncio.Semaphore(15)
+    
+    async with aiohttp.ClientSession(headers=headers) as session:
+        tasks = [fetch_tender_details_async(session, item, semaphore) for item in tenders]
+        enriched_tenders = await asyncio.gather(*tasks)
+
+    print(f"✨ 內頁詳細資格抓取完成！總耗時: {time.time() - start_time:.2f} 秒")
+    return enriched_tenders
+
+# ---------------------------------------------------------------------------
+# 3. Gemini AI 評分邏輯 (結合標案名稱 + 廠商資格)
 # ---------------------------------------------------------------------------
 def evaluate_tenders_with_ai(tenders, condition):
-    """使用 Gemini API 批次進行標案名稱打分"""
+    """使用 Gemini API 結合資格摘要進行深度評估與打分"""
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key or not condition:
         print("⚠️ 未設定 GEMINI_API_KEY 或 AI 條件為空，跳過 AI 打分。")
@@ -49,10 +111,10 @@ def evaluate_tenders_with_ai(tenders, condition):
         return tenders
 
     genai.configure(api_key=api_key)
-    # 使用最新強大的 Gemini 模型
-    model = genai.GenerativeModel("gemini-3.5-flash")
+    # 使用最新的 Gemini 1.5 Flash 進行高速評估
+    model = genai.GenerativeModel("gemini-1.5-flash")
 
-    # 1. 篩選出符合預算、需要 AI 評分的標案
+    # 1. 篩選出符合預算的標案
     valid_tenders = []
     for item in tenders:
         if not item.get("budget_pass", True):
@@ -66,32 +128,39 @@ def evaluate_tenders_with_ai(tenders, condition):
         print("ℹ️ 無符合預算條件的標案需進行 AI 評估。")
         return tenders
 
-    print(f"\n🤖 開始對 {len(valid_tenders)} 筆符合預算的標案進行批次 AI 打分...")
+    print(f"\n🤖 開始對 {len(valid_tenders)} 筆符合預算的標案進行『名稱+資格』深度 AI 打分...")
 
-    # 2. 分批處理 (每批 20 筆)
-    BATCH_SIZE = 20
+    # 2. 分批處理 (包含詳細資格後，建議每批 10 筆效果最佳)
+    BATCH_SIZE = 10
     for i in range(0, len(valid_tenders), BATCH_SIZE):
         batch = valid_tenders[i:i + BATCH_SIZE]
         
         # 組裝批次 Prompt
         items_text = ""
         for idx, item in enumerate(batch):
-            items_text += f"編號 {idx + 1}: {item['title']}\n"
+            qual = item.get("qualification", "無資格說明")
+            items_text += f"--- 標案編號 {idx + 1} ---\n"
+            items_text += f"標案名稱：{item['title']}\n"
+            items_text += f"招標機關：{item['org']}\n"
+            items_text += f"資格與附加說明：\n{qual}\n\n"
 
         prompt = f"""
-你是一個專業的政府標案篩選助手。
-我們的公司擅長與關注的領域如下：
+你是一個極度專業的政府標案適合度評估專家。
+我們公司的核心業務與擅長領域如下：
 【{condition}】
 
-請評估以下標案清單，依照與我們業務的相關度給予 0 到 100 的分數，並給出 15 字以內的簡短理由。
+請仔細閱讀下方標案清單（包含標案名稱與廠商資格需求），評估與我司業務的契合度：
+1. 給予 0 到 100 的適合度分數 (Score)。
+2. 若標案要求特定證照/門檻是我司不具備的，或屬於純硬體採購/純工程類，請給予低分(<50)。
+3. 給出 20 字以內的精準理由 (Reason)，點出是否符合關鍵技術。
 
 標案清單：
 {items_text}
 
-請嚴格按照以下 JSON 陣列格式回答，不要包含 Markdown 標籤或其他文字：
+請嚴格按照以下 JSON 陣列格式回答，不要包含 Markdown 標籤：
 [
-  {{"id": 1, "score": 85, "reason": "符合資安建置與防護需求"}},
-  {{"id": 2, "score": 20, "reason": "業務不符合，屬於水利工程"}}
+  {{"id": 1, "score": 88, "reason": "符合資安監控需求，資格門檻符合"}},
+  {{"id": 2, "score": 15, "reason": "屬於水利工程施工，與我司業務無關"}}
 ]
 """
         # 呼叫 API 並帶有容錯
@@ -118,14 +187,12 @@ def evaluate_tenders_with_ai(tenders, condition):
                 item["reason"] = "批次評估失敗"
                 item["recommended"] = "否"
 
-        # 批次之間微幅停頓 1 秒即可
-        import time
         time.sleep(1)
 
     return tenders
 
 # ---------------------------------------------------------------------------
-# 3. Google Sheets 寫入邏輯
+# 4. Google Sheets 寫入邏輯
 # ---------------------------------------------------------------------------
 def write_to_google_sheet(data):
     if not data:
@@ -154,13 +221,12 @@ def write_to_google_sheet(data):
     # 2. 金額初步過濾 (標註 budget_pass)
     for item in data:
         budget = item.get("budget", 0)
-        # 如果有設定金額且不在區間內
         if (min_b > 0 and budget < min_b) or (max_b > 0 and budget > max_b):
             item["budget_pass"] = False
         else:
             item["budget_pass"] = True
 
-    # 3. AI 打分 (只有金額符合的才會打分)
+    # 3. AI 打分
     processed_data = evaluate_tenders_with_ai(data, ai_cond)
 
     # 4. 寫入「每日勞務標案」分頁
@@ -192,10 +258,10 @@ def write_to_google_sheet(data):
     print(f"\n📊 已成功將 {len(rows_to_insert)} 筆標案寫入 Google 試算表！")
 
 # ---------------------------------------------------------------------------
-# 4. Playwright 爬蟲邏輯 (含預算金額解析)
+# 5. Playwright 列表頁抓取邏輯
 # ---------------------------------------------------------------------------
 async def fetch_all_daily_services():
-    print("🔍 [Playwright] 開始抓取今日『所有』勞務類標案...\n")
+    print("🔍 [Playwright] 開始抓取今日『所有』勞務類標案 URL...\n")
     
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -231,7 +297,6 @@ async def fetch_all_daily_services():
                 soup = BeautifulSoup(content, "html.parser")
                 
                 rows = soup.find_all("tr")
-                page_count = 0
 
                 for row in rows:
                     cols = row.find_all("td")
@@ -244,13 +309,12 @@ async def fetch_all_daily_services():
                             if href and any(k in href for k in ["tpam", "readDtl", "pk=", "location"]):
                                 org_name = cols[1].get_text(strip=True) if len(cols) > 1 else "未知機關"
                                 
-                                # 嘗試解析預算金額欄位 (若列表中有)
                                 raw_budget = 0
                                 for col in cols:
                                     text = col.get_text(strip=True)
                                     if "$" in text or "元" in text or text.replace(",", "").isdigit():
                                         nums = re.findall(r"\d+", text.replace(",", ""))
-                                        if nums and len(nums[0]) >= 5: # 抓取可能為金額的數字
+                                        if nums and len(nums[0]) >= 5:
                                             raw_budget = int(nums[0])
                                             break
 
@@ -263,7 +327,6 @@ async def fetch_all_daily_services():
                                         "budget": raw_budget,
                                         "link": full_link
                                     })
-                                    page_count += 1
                                     break
 
                 # 下一頁
@@ -276,7 +339,7 @@ async def fetch_all_daily_services():
                 else:
                     break
 
-            print(f"\n🎉 抓取完成！共 {len(tenders)} 筆標案！")
+            print(f"\n🎉 列表擷取完成！共取得 {len(tenders)} 筆標案 URL！")
             return tenders
 
         except Exception as e:
@@ -286,9 +349,18 @@ async def fetch_all_daily_services():
             await browser.close()
 
 # ---------------------------------------------------------------------------
-# 主程式
+# 主程式 (結合 Playwright + aiohttp + Gemini + GSheets)
 # ---------------------------------------------------------------------------
-if __name__ == "__main__":
-    daily_tenders = asyncio.run(fetch_all_daily_services())
+async def main():
+    # 1. Playwright 快速搜集列表
+    daily_tenders = await fetch_all_daily_services()
+    
     if daily_tenders:
-        write_to_google_sheet(daily_tenders)
+        # 2. aiohttp 高速併發抓取 300 件標案的廠商資格內頁
+        enriched_tenders = await enrich_tenders_with_details(daily_tenders)
+        
+        # 3. 進行預算過濾、Gemini AI 評估與寫入 Google Sheets
+        write_to_google_sheet(enriched_tenders)
+
+if __name__ == "__main__":
+    asyncio.run(main())
