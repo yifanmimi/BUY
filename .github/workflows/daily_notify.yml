@@ -2,8 +2,8 @@ name: 每日 LINE 定時提醒
 
 on:
   schedule:
-    # 💡 00:30 UTC 等於 08:30 Asia/Taipei (UTC+8)
-    - cron: '30 0 * * *' 
+    # 00:30 UTC 等於 08:30 Asia/Taipei (UTC+8)
+    - cron: '30 0 * * *'
   workflow_dispatch: # 允許手動觸發
 
 jobs:
@@ -12,11 +12,12 @@ jobs:
     steps:
       - name: 檢出專案程式碼
         uses: actions/checkout@v4
+        with:
+          # 💡 強制指定內部 Action 使用 Node.js 24 執行，避免 Deprecation 警告
+          force-node24: true 
 
       - name: 設定 Python 環境
         uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
 
       - name: 安裝必要套件
         run: pip install requests
@@ -26,5 +27,5 @@ jobs:
           TZ: 'Asia/Taipei'
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
-          SYSTEM_URL: 'https://your-app-url.com'
+          SYSTEM_URL: ${{ secrets.SYSTEM_URL }}
         run: python notify.py
