@@ -5,11 +5,11 @@ from datetime import datetime
 
 def send_line_notification():
     """獨立發送每日提醒通知至 LINE"""
-    channel_access_token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
-    user_id = os.environ.get("LINE_USER_ID")
+    channel_access_token = os.environ.get("AS7YGVDK7+LoM2UIqT/fY9pEJiygH957TE3Nl8hqadI6/uPEITOfByKj9L+CyiYsPvB5gySQxcRFphfEPNztTlYk6TO11yphjwqr85GtL8KILaDR/ng0/LmwrULtzA0G0PlBOqENFUnMkpqkkCQlZAdB04t89/1O/w1cDnyilFU=")
+    user_id = os.environ.get("Ud5474922b35e8da605fbd2b9bd3f2878")
     
     # 填入你的 Web App / 試算表網址
-    system_url = os.environ.get("SYSTEM_URL", "https://your-app-url.com")
+    system_url = os.environ.get("SYSTEM_URL", "https://yifanmimi.github.io/BUY/")
     
     if not channel_access_token or not user_id:
         print("ℹ️ 未設定 LINE 憑證，跳過推播。")
