@@ -4,6 +4,7 @@ import re
 import asyncio
 import time
 from datetime import datetime
+import zoneinfo  # Python 3.9+ 內建時區套件
 from playwright.async_api import async_playwright
 import aiohttp
 from bs4 import BeautifulSoup
@@ -111,7 +112,7 @@ def evaluate_tenders_with_ai(tenders, condition):
         return tenders
 
     genai.configure(api_key=api_key)
-    # 使用最新的 Gemini 3.5 Flash 進行高速評估
+    # 使用 gemini-3.5-flash 模型名稱
     model = genai.GenerativeModel("gemini-3.5-flash")
 
     # 1. 篩選出符合預算的標案
@@ -130,7 +131,7 @@ def evaluate_tenders_with_ai(tenders, condition):
 
     print(f"\n🤖 開始對 {len(valid_tenders)} 筆符合預算的標案進行『名稱+資格』深度 AI 打分...")
 
-    # 2. 分批處理 (包含詳細資格後，建議每批 10 筆效果最佳)
+    # 2. 分批處理 (包含詳細資格後，每批 10 筆效果最佳)
     BATCH_SIZE = 10
     for i in range(0, len(valid_tenders), BATCH_SIZE):
         batch = valid_tenders[i:i + BATCH_SIZE]
@@ -166,7 +167,15 @@ def evaluate_tenders_with_ai(tenders, condition):
         # 呼叫 API 並帶有容錯
         try:
             response = model.generate_content(prompt)
-            clean_text = response.text.replace("```json", "").replace("```", "").strip()
+            text = response.text.strip()
+
+            # 抓取最外層的 JSON [ ... ] 內容以容錯額外文字
+            json_match = re.search(r'\[.*\]', text, re.DOTALL)
+            if json_match:
+                clean_text = json_match.group(0)
+            else:
+                clean_text = text.replace("```json", "").replace("```", "").strip()
+
             results = json.loads(clean_text)
 
             # 將結果匹配回原始標案資料
@@ -236,12 +245,26 @@ def write_to_google_sheet(data):
         sheet = spreadsheet.add_worksheet(title="每日勞務標案", rows="1000", cols="10")
 
     sheet.clear()
-    headers = ["抓取時間", "招標機關", "標案名稱", "預算金額", "AI 評分", "AI 評語", "是否推薦 (≥70)", "詳細連結"]
+    
+    # 表頭加入「廠商資格與說明」欄位
+    headers = [
+        "抓取時間", 
+        "招標機關", 
+        "標案名稱", 
+        "預算金額", 
+        "AI 評分", 
+        "AI 評語", 
+        "是否推薦 (≥70)", 
+        "廠商資格與說明", 
+        "詳細連結"
+    ]
     sheet.append_row(headers)
 
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # 強制切換為台灣時間 (Asia/Taipei)
+    taipei_tz = zoneinfo.ZoneInfo("Asia/Taipei")
+    now_str = datetime.now(taipei_tz).strftime("%Y-%m-%d %H:%M:%S")
+
     rows_to_insert = []
-    
     for item in processed_data:
         rows_to_insert.append([
             now_str,
@@ -251,6 +274,7 @@ def write_to_google_sheet(data):
             item.get("score", 0),
             item.get("reason", ""),
             item.get("recommended", "否"),
+            item.get("qualification", "無詳細資格說明"),
             item["link"]
         ])
 
@@ -356,7 +380,7 @@ async def main():
     daily_tenders = await fetch_all_daily_services()
     
     if daily_tenders:
-        # 2. aiohttp 高速併發抓取 300 件標案的廠商資格內頁
+        # 2. aiohttp 高速併發抓取標案的廠商資格內頁
         enriched_tenders = await enrich_tenders_with_details(daily_tenders)
         
         # 3. 進行預算過濾、Gemini AI 評估與寫入 Google Sheets
