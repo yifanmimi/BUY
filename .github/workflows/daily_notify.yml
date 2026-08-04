@@ -1,0 +1,30 @@
+name: 每日 LINE 定時提醒
+
+on:
+  schedule:
+    # 💡 00:30 UTC 等於 08:30 Asia/Taipei (UTC+8)
+    - cron: '30 0 * * *' 
+  workflow_dispatch: # 允許手動觸發
+
+jobs:
+  send-notification:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 檢出專案程式碼
+        uses: actions/checkout@v4
+
+      - name: 設定 Python 環境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: 安裝必要套件
+        run: pip install requests
+
+      - name: 執行推播腳本
+        env:
+          TZ: 'Asia/Taipei'
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+          SYSTEM_URL: 'https://your-app-url.com'
+        run: python notify.py
