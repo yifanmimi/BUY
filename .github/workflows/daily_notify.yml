@@ -2,8 +2,9 @@ name: 每日 LINE 定時提醒
 
 on:
   schedule:
-    # 00:30 UTC 等於 08:30 Asia/Taipei (UTC+8)
-    - cron: '30 0 * * *'
+    # 00:23 UTC 等於 08:23 Asia/Taipei (UTC+8)
+    # 1-5 代表僅在週一至週五執行
+    - cron: '23 0 * * 1-5'
   workflow_dispatch: # 允許手動觸發
 
 jobs:
@@ -13,16 +14,27 @@ jobs:
       - name: 檢出專案程式碼
         uses: actions/checkout@v4
         with:
-          # 💡 強制指定內部 Action 使用 Node.js 24 執行，避免 Deprecation 警告
           force-node24: true 
 
       - name: 設定 Python 環境
         uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-      - name: 安裝必要套件
-        run: pip install requests
+      - name: 安裝必要套件與 Playwright 瀏覽器
+        run: |
+          pip install requests playwright aiohttp beautifulsoup4 gspread google-auth google-generativeai
+          playwright install --with-deps chromium
 
-      - name: 執行推播腳本
+      - name: 執行標案爬蟲與 AI 評估 (產生 new_tenders.json)
+        env:
+          TZ: 'Asia/Taipei'
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          SPREADSHEET_KEY: ${{ secrets.SPREADSHEET_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python search.py
+
+      - name: 執行 LINE 推播腳本 (有新案才發送)
         env:
           TZ: 'Asia/Taipei'
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
