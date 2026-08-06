@@ -280,7 +280,32 @@ def write_to_google_sheet(data):
 
     sheet.append_rows(rows_to_insert)
     print(f"\n📊 已成功將 {len(rows_to_insert)} 筆標案寫入 Google 試算表！")
+    # ---------------------------------------------------------------------------
+    # 匯出符合條件的新標案給 notify.py 發送推播 (完全不影響原本 Playwright 與試算表邏輯)
+    # ---------------------------------------------------------------------------
+    recommended_tenders = [
+        {
+            "title": item["title"],
+            "budget": f"{item['budget']:,} 元" if item['budget'] > 0 else "未提供/另行公告",
+            "unit": item["org"],
+            "score": item.get("score", 0),
+            "reason": item.get("reason", "")
+        }
+        for item in processed_data
+        if item.get("budget_pass", True) and item.get("score", 0) >= 70
+    ]
 
+    json_filename = "new_tenders.json"
+    
+    if recommended_tenders:
+        with open(json_filename, "w", encoding="utf-8") as f:
+            json.dump(recommended_tenders, f, ensure_ascii=False, indent=2)
+        print(f"📁 已成功匯出 {len(recommended_tenders)} 筆推薦標案至 {json_filename}！")
+    else:
+        with open(json_filename, "w", encoding="utf-8") as f:
+            json.dump([], f, ensure_ascii=False, indent=2)
+        print(f"ℹ️ 今日無符合條件 (≥70分) 的推薦標案，已產生空 {json_filename}")
+        
 # ---------------------------------------------------------------------------
 # 5. Playwright 列表頁抓取邏輯
 # ---------------------------------------------------------------------------
