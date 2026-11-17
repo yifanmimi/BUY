@@ -43,7 +43,7 @@
     </div>
 
     <div id="content-area" style="display: none;">
-      
+
       <!-- 區塊一：★ 高分推薦標案（動態撈取系統設定） -->
       <div class="card shadow-sm border-0 mb-5">
         <div class="card-header bg-white py-3">
@@ -55,7 +55,7 @@
               <span class="badge bg-success-subtle text-success border border-success-subtle">已依分數降冪排序</span>
             </div>
           </div>
-          
+
           <!-- 動態篩選條件註記區 -->
           <div class="d-flex flex-wrap gap-2 align-items-center pt-2 border-top mt-2">
             <span class="text-muted small fw-bold"><i class="bi bi-funnel-fill text-primary"></i> 篩選條件：</span>
@@ -99,10 +99,10 @@
               <i id="collapse-icon" class="bi bi-chevron-right me-1"></i> 剩餘標案清單 (<span id="other-count">0</span>)
               <span class="text-muted fs-6 fw-normal ms-2">(點擊展開/收合)</span>
             </div>
-            
+
             <div class="search-box input-group input-group-sm">
               <span class="input-group-text bg-light"><i class="bi bi-search"></i></span>
-              <input type="text" id="searchInput" class="form-control" placeholder="搜尋招標機關或標案名稱..." onkeyup="filterOtherTenders()">
+              <input type="text" id="searchInput" class="form-control" placeholder="搜尋招標機關或標案名稱..." oninput="filterOtherTenders()">
             </div>
           </div>
         </div>
@@ -134,6 +134,8 @@
     const SPREADSHEET_ID = '1Hc2KqH0ZWT1Ty-5RBa4zdsx-8RLrHG-tNE5qJHuaQ6U';
     const GID_CONFIG = '888640987';   // 系統設定分頁 GID
     const GID_TENDERS = '1698058908'; // 每日勞務標案分頁 GID
+    // 只撈前台用得到的欄位（不含很長的 H 欄「廠商資格與說明」），資料量少很多
+    const TENDER_COLUMNS = 'SELECT A, B, C, D, E, F, G, I';
 
     let recommendedData = [];
     let otherData = [];
@@ -167,7 +169,7 @@
       // 強制寫明 select B 與 headers=0，確保 B 欄長文字百分之百完整回傳
       const tqSql = encodeURIComponent("SELECT B");
       configScript.src = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?gid=${GID_CONFIG}&tq=${tqSql}&headers=0&tqx=responseHandler:handleConfigData`;
-      
+
       configScript.onerror = function() {
         console.warn('讀取系統設定分頁失敗，準備直接讀取標案資料');
         fetchTendersData();
@@ -176,22 +178,12 @@
       document.body.appendChild(configScript);
     }
 
-    // 解析系統設定：
-    // GViz 會將 Row 1 當作 Header，因此 rows 陣列直接從 Row 2 開始：
-    // rows[0] = Row 2 (B2 最低金額)
-    // rows[1] = Row 3 (B3 最高金額)
-    // rows[2] = Row 4 (B4 擅長條件)
+    // 解析系統設定：只 SELECT B，rows[0]=B1 標題、rows[1]=B2 最低預算、rows[2]=B3 最高預算、rows[3]=B4 擅長條件
     function handleConfigData(response) {
       try {
         if (response && response.table && response.table.rows) {
           const rows = response.table.rows;
-          
-          // 因為只 SELECT B，所以每個 row.c[0] 就直接是 B 欄的值：
-          // rows[0] -> B1 (標題)
-          // rows[1] -> B2 (最低預算)
-          // rows[2] -> B3 (最高預算)
-          // rows[3] -> B4 (擅長條件)
-          
+
           let minBudgetCell = rows[1]?.c?.[0];
           let maxBudgetCell = rows[2]?.c?.[0];
           let skillsCell = rows[3]?.c?.[0];
@@ -209,7 +201,7 @@
           } else {
             budgetDisplay += '未限制';
           }
-          
+
           document.getElementById('badge-budget').innerHTML = `<i class="bi bi-currency-dollar text-danger"></i> ${budgetDisplay}`;
           document.getElementById('badge-skills').innerHTML = `<i class="bi bi-cpu-fill text-info"></i> AI 評分依據 (公司擅長條件)：<strong>${skillsStr || '未設定'}</strong>`;
         }
@@ -234,8 +226,8 @@
 
       const script = document.createElement('script');
       script.id = 'gviz-script';
-      script.src = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?gid=${GID_TENDERS}&tqx=responseHandler:handleGvizData`;
-      
+      script.src = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?gid=${GID_TENDERS}&tq=${encodeURIComponent(TENDER_COLUMNS)}&tqx=responseHandler:handleGvizData`;
+
       script.onerror = function() {
         alert('標案資料載入失敗，請確認試算表權限！');
         document.getElementById('loading').style.display = 'none';
@@ -250,7 +242,7 @@
 
         const table = response.table;
         const cols = table.cols.map(col => (col ? String(col.label).trim() : ''));
-        
+
         const rows = table.rows.map(row => {
           let item = {};
           if (row.c) {
@@ -357,8 +349,8 @@
     }
 
     function updateSortIcons(type, activeField, dir) {
-      const fields = (type === 'rec') 
-        ? ['scoreNum', 'orgStr', 'titleStr', 'budgetNum'] 
+      const fields = (type === 'rec')
+        ? ['scoreNum', 'orgStr', 'titleStr', 'budgetNum']
         : ['orgStr', 'titleStr', 'budgetNum', 'scoreNum'];
 
       fields.forEach(f => {
@@ -398,17 +390,16 @@
       dateBadge.innerHTML = `<i class="bi bi-calendar3"></i> 資料日期：${formattedDate}`;
     }
 
+    // 表格一次組好再放進頁面（原本每列都 innerHTML +=，上千列會卡十幾秒）
     function renderRecommended() {
       const tbody = document.getElementById('recommended-table-body');
-      tbody.innerHTML = '';
 
       if (recommendedData.length === 0) {
         tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">今日無符合條件的高分推薦標案。</td></tr>';
         return;
       }
 
-      recommendedData.forEach(item => {
-        const rowHtml = `
+      tbody.innerHTML = recommendedData.map(item => `
           <tr>
             <td><span class="badge bg-success fs-6 py-2 px-2">${item.scoreNum} 分</span></td>
             <td class="small fw-bold text-secondary">${item.orgStr}</td>
@@ -420,23 +411,18 @@
                 連結 <i class="bi bi-box-arrow-up-right"></i>
               </a>
             </td>
-          </tr>
-        `;
-        tbody.innerHTML += rowHtml;
-      });
+          </tr>`).join('');
     }
 
     function renderOthers(dataList) {
       const tbody = document.getElementById('other-table-body');
-      tbody.innerHTML = '';
 
       if (dataList.length === 0) {
         tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">無符合條件的標案</td></tr>';
         return;
       }
 
-      dataList.forEach(item => {
-        const rowHtml = `
+      tbody.innerHTML = dataList.map(item => `
           <tr>
             <td class="small fw-bold text-secondary">${item.orgStr}</td>
             <td class="small fw-bold">${item.titleStr}</td>
@@ -447,20 +433,21 @@
                 連結 <i class="bi bi-box-arrow-up-right"></i>
               </a>
             </td>
-          </tr>
-        `;
-        tbody.innerHTML += rowHtml;
-      });
+          </tr>`).join('');
     }
 
+    let filterTimer = null;
     function filterOtherTenders() {
-      const keyword = document.getElementById('searchInput').value.toLowerCase().trim();
-      currentFilteredOtherData = otherData.filter(item => {
-        const matchTitle = item.titleStr.toLowerCase().includes(keyword);
-        const matchOrg = item.orgStr.toLowerCase().includes(keyword);
-        return matchTitle || matchOrg;
-      });
-      renderOthers(currentFilteredOtherData);
+      clearTimeout(filterTimer);
+      filterTimer = setTimeout(() => {
+        const keyword = document.getElementById('searchInput').value.toLowerCase().trim();
+        currentFilteredOtherData = otherData.filter(item => {
+          const matchTitle = String(item.titleStr).toLowerCase().includes(keyword);
+          const matchOrg = String(item.orgStr).toLowerCase().includes(keyword);
+          return matchTitle || matchOrg;
+        });
+        renderOthers(currentFilteredOtherData);
+      }, 150);
     }
 
     window.onload = fetchData;
