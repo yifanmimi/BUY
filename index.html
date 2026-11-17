@@ -20,6 +20,8 @@
       display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
     .skills-badge.expanded { display: block; -webkit-line-clamp: unset; }
   </style>
+  <!-- Google 登入 -->
+  <script src="https://accounts.google.com/gsi/client" async></script>
 </head>
 <body>
 
@@ -35,15 +37,28 @@
           </span>
         </div>
       </div>
-      <button class="btn btn-primary" onclick="fetchData()">
-        <i class="bi bi-arrow-clockwise"></i> 刷新資料
-      </button>
+      <div class="d-flex gap-2">
+        <button class="btn btn-primary" onclick="fetchData()">
+          <i class="bi bi-arrow-clockwise"></i> 刷新資料
+        </button>
+        <button class="btn btn-outline-secondary" id="logout-btn" onclick="logout()" hidden>
+          <i class="bi bi-box-arrow-right"></i> 登出
+        </button>
+      </div>
+    </div>
+
+    <!-- 登入畫面：還沒登入或沒有權限時顯示 -->
+    <div id="login-area" class="text-center py-5" hidden>
+      <i class="bi bi-lock-fill text-secondary" style="font-size: 3rem;"></i>
+      <p class="mt-3 fw-bold">請先用 Google 帳號登入</p>
+      <p class="text-danger small" id="login-message"></p>
+      <div id="google-login-btn" class="d-inline-block"></div>
     </div>
 
     <!-- 載入中動畫 -->
     <div id="loading" class="text-center py-5">
       <div class="spinner-border text-primary" style="width: 3rem; height: 3rem;" role="status"></div>
-      <p class="mt-3 text-muted fw-bold">正在連線 Google Sheets 同步設定與標案...</p>
+      <p class="mt-3 text-muted fw-bold">正在讀取設定與標案...</p>
     </div>
 
     <div id="content-area" style="display: none;">
@@ -135,11 +150,11 @@
   </div>
 
   <script>
-    const SPREADSHEET_ID = '1Hc2KqH0ZWT1Ty-5RBa4zdsx-8RLrHG-tNE5qJHuaQ6U';
-    const GID_CONFIG = '888640987';   // 系統設定分頁 GID
-    const GID_TENDERS = '1698058908'; // 每日勞務標案分頁 GID
-    // 只撈前台用得到的欄位（不含很長的 H 欄「廠商資格與說明」），資料量少很多
-    const TENDER_COLUMNS = 'SELECT A, B, C, D, E, F, G, I';
+    // 後端（Apps Script 網頁應用程式）網址與 Google 登入用戶端 ID。
+    // 這兩個值公開沒關係：資料要登入、而且帳號在允許名單上，後端才會給。
+    const API_URL = 'https://script.google.com/macros/s/AKfycbzRH784INxfhqynOIy4LIhB_b6qHfaFifbI8NRgIbrcriBlKsVu4CpOMjJ9uzUtqg48IQ/exec';
+    const CLIENT_ID = '265991764431-7mv80vl7iighqahnbd1nihgpff50odf6.apps.googleusercontent.com';
+    const TOKEN_KEY = 'buy_login_token';
 
     let recommendedData = [];
     let otherData = [];
@@ -160,26 +175,88 @@
       }
     }
 
-    // 第一步：精準使用 GID 撈取「系統設定」分頁
-    function fetchData() {
+    // ───────── 登入 ─────────
+
+    // 頁面載入：準備 Google 登入。以前登入過的話會自動登入。
+    function initLogin() {
+      if (!window.google?.accounts?.id) {
+        setTimeout(initLogin, 200);   // 登入程式庫還在下載，等一下
+        return;
+      }
+      google.accounts.id.initialize({
+        client_id: CLIENT_ID,
+        callback: response => {
+          sessionStorage.setItem(TOKEN_KEY, response.credential);
+          fetchData();
+        },
+        auto_select: true,
+        cancel_on_tap_outside: false
+      });
+      google.accounts.id.renderButton(document.getElementById('google-login-btn'), {
+        theme: 'filled_blue', size: 'large', text: 'signin_with', shape: 'pill', locale: 'zh-TW'
+      });
+
+      if (sessionStorage.getItem(TOKEN_KEY)) {
+        fetchData();
+      } else {
+        showLogin('');
+        google.accounts.id.prompt();
+      }
+    }
+
+    function showLogin(message) {
+      document.getElementById('login-message').innerText = message;
+      document.getElementById('login-area').hidden = false;
+      document.getElementById('logout-btn').hidden = true;
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('content-area').style.display = 'none';
+    }
+
+    function logout() {
+      sessionStorage.removeItem(TOKEN_KEY);
+      google.accounts.id.disableAutoSelect();
+      showLogin('已登出。');
+    }
+
+    // ───────── 讀資料 ─────────
+
+    // 把登入憑證送給後端，後端確認身分後回傳系統設定與標案
+    async function fetchData() {
+      const token = sessionStorage.getItem(TOKEN_KEY);
+      if (!token) {
+        showLogin('');
+        return;
+      }
+
+      document.getElementById('login-area').hidden = true;
       document.getElementById('loading').style.display = 'block';
       document.getElementById('content-area').style.display = 'none';
 
-      const oldConfigScript = document.getElementById('gviz-config-script');
-      if (oldConfigScript) oldConfigScript.remove();
+      try {
+        // 用 text/plain 送出，Apps Script 才不會因為跨網域預檢而擋掉
+        const response = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ token: token })
+        });
+        const result = await response.json();
 
-      const configScript = document.createElement('script');
-      configScript.id = 'gviz-config-script';
-      // 強制寫明 select B 與 headers=0，確保 B 欄長文字百分之百完整回傳
-      const tqSql = encodeURIComponent("SELECT B");
-      configScript.src = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?gid=${GID_CONFIG}&tq=${tqSql}&headers=0&tqx=responseHandler:handleConfigData`;
+        if (result.error === 'TOKEN' || result.error === 'NO_ACCESS') {
+          sessionStorage.removeItem(TOKEN_KEY);
+          google.accounts.id.disableAutoSelect();
+          showLogin(result.message);
+          return;
+        }
+        if (result.error) throw new Error(result.message);
 
-      configScript.onerror = function() {
-        console.warn('讀取系統設定分頁失敗，準備直接讀取標案資料');
-        fetchTendersData();
-      };
-
-      document.body.appendChild(configScript);
+        document.getElementById('logout-btn').hidden = false;
+        handleConfigData(result.config);
+        handleGvizData(result.tenders);
+      } catch (err) {
+        console.error('讀取資料失敗:', err);
+        alert('資料讀取失敗：' + err.message);
+        document.getElementById('loading').style.display = 'none';
+      }
     }
 
     // 解析系統設定：只 SELECT B，rows[0]=B1 標題、rows[1]=B2 最低預算、rows[2]=B3 最高預算、rows[3]=B4 擅長條件
@@ -211,8 +288,6 @@
         }
       } catch (err) {
         console.error('解析系統設定時出錯:', err);
-      } finally {
-        fetchTendersData();
       }
     }
 
@@ -221,23 +296,6 @@
         return (num / 10000) + '萬';
       }
       return num.toLocaleString() + '元';
-    }
-
-    // 第二步：精準使用 GID 撈取「每日勞務標案」分頁
-    function fetchTendersData() {
-      const oldScript = document.getElementById('gviz-script');
-      if (oldScript) oldScript.remove();
-
-      const script = document.createElement('script');
-      script.id = 'gviz-script';
-      script.src = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?gid=${GID_TENDERS}&tq=${encodeURIComponent(TENDER_COLUMNS)}&tqx=responseHandler:handleGvizData`;
-
-      script.onerror = function() {
-        alert('標案資料載入失敗，請確認試算表權限！');
-        document.getElementById('loading').style.display = 'none';
-      };
-
-      document.body.appendChild(script);
     }
 
     function handleGvizData(response) {
@@ -454,7 +512,7 @@
       }, 150);
     }
 
-    window.onload = fetchData;
+    window.onload = initLogin;
   </script>
 </body>
 </html>
