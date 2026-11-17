@@ -15,6 +15,10 @@
     .sortable-th { cursor: pointer; user-select: none; }
     .sortable-th:hover { background-color: #e9ecef; }
     .filter-note-badge { font-size: 0.8rem; }
+    /* 評分依據很長：允許換行、預設只顯示兩行，點一下展開 */
+    .skills-badge { white-space: normal; text-align: left; line-height: 1.6; max-width: 100%; font-weight: normal;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+    .skills-badge.expanded { display: block; -webkit-line-clamp: unset; }
   </style>
 </head>
 <body>
@@ -65,7 +69,7 @@
             <span class="badge bg-light text-dark border filter-note-badge">
               <i class="bi bi-award-fill text-warning"></i> 推薦標準：AI 評分 ≥ 70分 或 ★手動標記
             </span>
-            <span class="badge bg-light text-dark border filter-note-badge" id="badge-skills">
+            <span class="badge bg-light text-dark border filter-note-badge skills-badge" id="badge-skills" title="點一下展開／收合" onclick="this.classList.toggle('expanded')">
               <i class="bi bi-cpu-fill text-info"></i> 評分依據：載入中...
             </span>
           </div>
